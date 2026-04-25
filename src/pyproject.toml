@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "se-interview"
-version = "0.2.5"
+version = "0.3.0"
 description = "A simple LangGraph agent with web search capability"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
@@ -18,18 +18,12 @@ fastapi = "^0.115"
 uvicorn = "^0.32"
 requests = "^2.31"
 openai = "^1.58"
-openinference-instrumentation-langchain = {version = "^0.1", python = ">=3.11,<3.15"}
-pyyaml = "^6.0"
-arize-phoenix-otel = {version = "^0.15", python = ">=3.11,<3.15", optional = true}
-arize-otel = {version = "^0.12", python = ">=3.11,<3.15", optional = true}
-opentelemetry-exporter-otlp-proto-http = {version = "^1.30", optional = true}
+traceloop-sdk = "^0.33"
+python-json-logger = "^2.0"
 pytest = {version = "^8", optional = true}
 httpx = {version = "^0.27", optional = true}
 
 [tool.poetry.extras]
-phoenix = ["arize-phoenix-otel"]
-arize = ["arize-otel"]
-custom = ["opentelemetry-exporter-otlp-proto-http"]
 dev = ["pytest", "httpx"]
 
 [tool.pytest.ini_options]

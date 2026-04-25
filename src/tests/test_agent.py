@@ -5,12 +5,16 @@ nodes and that all four tools are registered — without making any live
 LLM or API calls.
 """
 
-import os
-from unittest.mock import patch, MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-from agent import build_agent, tools, get_prompt_version, SAVE_MONEY_PROMPT_VERSION, FULL_EXPERIENCE_PROMPT_VERSION
+from agent import (
+    FULL_EXPERIENCE_PROMPT_VERSION,
+    SAVE_MONEY_PROMPT_VERSION,
+    build_agent,
+    get_prompt_version,
+    tools,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -58,113 +62,20 @@ def test_prompt_version_routing() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 7 (overall): tracing config resolves env vars
+# Test 7 (overall): tracing initializes via Traceloop SDK
 # ---------------------------------------------------------------------------
 
-def test_load_tracing_config_resolves_env_vars() -> None:
-    """_load_tracing_config resolves ${VAR} and ${VAR:-default} from env."""
-    import tempfile
-    from pathlib import Path as RealPath
-    from agent import _load_tracing_config
-
-    config_content = (
-        "OTEL_DESTINATION: arize\n"
-        "arize:\n"
-        "  space_id: ${TEST_SPACE_ID}\n"
-        "  api_key: ${TEST_API_KEY:-fallback_key}\n"
-    )
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(config_content)
-        f.flush()
-        tmp_path = RealPath(f.name)
-
-    try:
-        with patch("agent.Path") as mock_path_cls:
-            mock_parent = MagicMock()
-            mock_parent.__truediv__ = lambda self, name: tmp_path
-            mock_path_inst = MagicMock()
-            mock_path_inst.parent = mock_parent
-            mock_path_cls.return_value = mock_path_inst
-
-            with patch.dict(os.environ, {"TEST_SPACE_ID": "space-123"}, clear=False):
-                # TEST_API_KEY not set — should use fallback
-                os.environ.pop("TEST_API_KEY", None)
-                config = _load_tracing_config()
-
-        assert config["OTEL_DESTINATION"] == "arize"
-        assert config["arize"]["space_id"] == "space-123"
-        assert config["arize"]["api_key"] == "fallback_key"
-    finally:
-        tmp_path.unlink()
-
-
-# ---------------------------------------------------------------------------
-# Test 8 (overall): trace backend defaults to Phoenix
-# ---------------------------------------------------------------------------
-
-def test_init_tracing_defaults_to_phoenix() -> None:
-    """When OTEL_DESTINATION is phoenix, _init_tracing calls _init_phoenix."""
+def test_init_tracing_calls_traceloop() -> None:
+    """_init_tracing should call Traceloop.init with app_name=travelshaper."""
     from agent import _init_tracing
 
-    with patch("agent._load_tracing_config", return_value={
-             "OTEL_DESTINATION": "phoenix",
-             "phoenix": {"endpoint": "http://localhost:6006/v1/traces"},
-         }), \
-         patch("agent._init_phoenix", return_value=MagicMock()) as mock_phoenix, \
-         patch("agent._init_arize") as mock_arize, \
-         patch("agent._init_custom") as mock_custom, \
-         patch("openinference.instrumentation.langchain.LangChainInstrumentor"):
+    fake_module = MagicMock()
+    fake_traceloop_cls = MagicMock()
+    fake_module.Traceloop = fake_traceloop_cls
+
+    with patch.dict(sys.modules, {"traceloop.sdk": fake_module}):
         _init_tracing()
 
-    mock_phoenix.assert_called_once()
-    mock_arize.assert_not_called()
-    mock_custom.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Test 9 (overall): trace backend selects Arize when configured
-# ---------------------------------------------------------------------------
-
-def test_init_tracing_selects_arize_when_configured() -> None:
-    """When OTEL_DESTINATION is arize, _init_tracing calls _init_arize."""
-    from agent import _init_tracing
-
-    with patch("agent._load_tracing_config", return_value={
-             "OTEL_DESTINATION": "arize",
-             "arize": {"space_id": "s", "api_key": "k"},
-         }), \
-         patch("agent._init_arize", return_value=MagicMock()) as mock_arize, \
-         patch("agent._init_phoenix") as mock_phoenix, \
-         patch("agent._init_custom") as mock_custom, \
-         patch("openinference.instrumentation.langchain.LangChainInstrumentor"):
-        _init_tracing()
-
-    mock_arize.assert_called_once()
-    mock_phoenix.assert_not_called()
-    mock_custom.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Test 10 (overall): trace backend selects custom when configured
-# ---------------------------------------------------------------------------
-
-def test_init_tracing_selects_custom() -> None:
-    """When OTEL_DESTINATION is custom, _init_tracing calls _init_custom."""
-    from agent import _init_tracing
-
-    with patch("agent._load_tracing_config", return_value={
-             "OTEL_DESTINATION": "custom",
-             "custom": {
-                 "endpoint": "https://cribl:4318/v1/traces",
-                 "protocol": "http/protobuf",
-             },
-         }), \
-         patch("agent._init_custom", return_value=MagicMock()) as mock_custom, \
-         patch("agent._init_phoenix") as mock_phoenix, \
-         patch("agent._init_arize") as mock_arize, \
-         patch("openinference.instrumentation.langchain.LangChainInstrumentor"):
-        _init_tracing()
-
-    mock_custom.assert_called_once()
-    mock_phoenix.assert_not_called()
-    mock_arize.assert_not_called()
+    fake_traceloop_cls.init.assert_called_once()
+    call_kwargs = fake_traceloop_cls.init.call_args.kwargs
+    assert call_kwargs.get("app_name") == "travelshaper"

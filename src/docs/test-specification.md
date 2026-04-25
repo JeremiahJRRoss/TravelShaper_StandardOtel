@@ -1,7 +1,7 @@
 # Test Specification — TravelShaper Travel Assistant
 
-**Version:** 2.1 (v0.1.5)  
-**Total tests:** 14 passing  
+**Version:** 3.0 (v0.3.0)  
+**Total tests:** 15 passing  
 **Every test uses mocked external calls.** No test requires a live API key.
 
 ---
@@ -99,6 +99,23 @@ Assertion: 200 response; agent called.
 
 ---
 
+## tests/test_tracing.py (2 tests)
+
+### Test 15 — test_init_tracing_calls_traceloop
+Verifies that `init_tracing()` initialises the Traceloop SDK with the configured
+service name and OTLP HTTP endpoint.
+Mock: patches `Traceloop.init` at the module level.
+Assertions: `Traceloop.init` is called once; the call passes `app_name` matching
+the configured service name and an `api_endpoint` derived from
+`TRACELOOP_BASE_URL` (default `http://localhost:4318`).
+
+### Test 16 — test_trace_url_returns_trace_prefix
+Verifies that `_trace_url(run_id)` returns the canonical
+`"trace:{run_id}"` form used by `/feedback` and other surfaces.
+Assertion: `_trace_url("abc123") == "trace:abc123"`.
+
+---
+
 ## Running the full suite
 
 ```bash
@@ -106,4 +123,4 @@ cd src
 pytest tests/ -v
 ```
 
-Expected output: `14 passed` (1 warning about `temperature` in `model_kwargs` is expected and harmless).
+Expected output: `16 passed` (1 warning about `temperature` in `model_kwargs` is expected and harmless).

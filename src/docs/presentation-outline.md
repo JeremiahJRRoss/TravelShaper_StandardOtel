@@ -59,17 +59,17 @@
 
 ---
 
-## Slide 7: Observability — OpenTelemetry & OpenInference (3 min)
+## Slide 7: Observability — OpenTelemetry & Traceloop (3 min)
 
 **Explain the concepts:**
 - **OpenTelemetry** — the industry standard for distributed tracing
-- **OpenInference** — a semantic convention built on top of OpenTelemetry for AI/ML
+- **Traceloop SDK (OpenLLMetry)** — auto-instruments LangChain/LangGraph and OpenAI calls and emits OTel spans with GenAI-specific attributes
 - **Traces vs. Spans:**
   - A **trace** is the full lifecycle of one user request
   - A **span** is a single step (one LLM call, one tool execution)
-- **Phoenix** consumes these traces and provides a UI for exploring and evaluating them
+- **Observe** consumes these traces (via the Observe Agent on the host) and provides the UI for exploring them, alongside the structured JSON logs the app writes to `/app/logs/travelshaper.log`
 
-**Show in Phoenix:**
+**Show in Observe:**
 - A real trace from the demo queries
 - Point out the root span, LLM spans, tool spans
 - Show token counts, latency per span, tool inputs/outputs
@@ -89,11 +89,10 @@
 ## Slide 9: Evaluation (3 min)
 - Three metrics: User Frustration, Tool Usage Correctness, Answer Completeness
 - All use LLM-as-judge pattern: send trace data to GPT-4o with an evaluation prompt
-- **User Frustration:** detects incomplete answers, ignored requests, fabricated details (Phoenix built-in template)
+- **User Frustration:** detects incomplete answers, ignored requests, fabricated details
 - **Tool Correctness:** checks if the right tools were called with valid parameters (custom prompt)
 - **Answer Completeness:** three-tier classification with scope awareness (custom prompt)
-- Show evaluation results in Phoenix: labels, scores, explanations
-- Show the frustrated interactions dataset
+- The automated eval pipeline was removed during the Observe migration — the prompts (see `evaluation-prompts.md`) are preserved for reimplementation against Observe's query/dataset features or an external eval runner
 - "This is how you'd build a feedback loop — identify failure cases, create a dataset, fine-tune or adjust prompts"
 
 ---
@@ -102,7 +101,7 @@
 - Show the production architecture diagram:
   - Load balancer → N stateless TravelShaper instances → external APIs
   - Redis for caching + future session memory
-  - Phoenix/OTEL collector for async trace export
+  - Observe Agent (host-side) receives Traceloop OTLP spans and tails JSON logs, forwarding both to Observe
 - **Scaling strategy:** horizontal scaling is easy because the app is stateless
 - **Cost considerations:** OpenAI is the dominant cost (~$0.02-$0.08/query), SerpAPI free tier supports ~60-125 briefings/month
 
@@ -112,9 +111,9 @@
 1. Show the app running (curl to /health)
 2. Send a full trip planning query
 3. Walk through the response — point out flights, hotels, cultural prep, interest suggestions
-4. Switch to Phoenix UI — show the trace
+4. Switch to Observe — show the trace landed via the Observe Agent
 5. Show spans: LLM calls, tool calls, latency breakdown
-6. Show evaluation results from the pre-run evaluation batch
+6. Show the corresponding structured JSON log lines from `/app/logs/travelshaper.log` correlated by trace id
 7. Optionally: send a second query to show different tool dispatch
 
 **Demo options:**
@@ -162,7 +161,7 @@ curl -s -X POST http://localhost:8000/chat \
 | Title + Problem + Overview | 2.5 |
 | Agent Architecture + Tools | 5 |
 | System Prompt | 1.5 |
-| Observability (OTEL/OpenInference/Traces) | 5 |
+| Observability (OTEL/Traceloop/Observe) | 5 |
 | Evaluation | 3 |
 | Deployment Architecture | 3 |
 | Live Demo | 5 |
@@ -175,8 +174,8 @@ curl -s -X POST http://localhost:8000/chat \
 
 - [ ] TravelShaper running: `docker compose up -d` from `src/`
 - [ ] Browser open at `http://localhost:8000` — confirm UI loads
-- [ ] Phoenix running at `http://localhost:6006` with traces from 11 queries
-- [ ] Evaluations already run (results visible in Phoenix)
+- [ ] Observe Agent running on the host and receiving OTLP HTTP on port 4318
+- [ ] Observe workspace open with traces from the 11 demo queries already ingested
 - [ ] Terminal with curl commands ready as backup
 - [ ] Architecture diagram ready
 - [ ] No API keys visible on screen

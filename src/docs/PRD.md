@@ -1,6 +1,6 @@
 # Product Requirements Document — TravelShaper Travel Assistant
 
-**Version:** 1.2
+**Version:** 1.3 (v0.3.0 — Observe migration)
 **Date:** April 2026
 **Status:** Implementation phase
 **Author:** [Your Name]
@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-This document defines the product requirements for TravelShaper, an AI-powered travel planning assistant built as a technical assessment. TravelShaper extends a LangGraph starter application into a functional travel agent that searches real flight and hotel data, provides cultural preparation guidance, and delivers synthesized trip recommendations — all instrumented with Arize Phoenix for observability and evaluation.
+This document defines the product requirements for TravelShaper, an AI-powered travel planning assistant built as a technical assessment. TravelShaper extends a LangGraph starter application into a functional travel agent that searches real flight and hotel data, provides cultural preparation guidance, and delivers synthesized trip recommendations — all instrumented with the Traceloop SDK (OpenLLMetry) and a host-side Observe Agent that forwards traces and structured logs to Observe cloud.
 
 > **In one sentence:** TravelShaper is a single-turn, LLM-powered travel planning assistant that combines structured flight and hotel search with interest-based destination intelligence and cultural prep to deliver an explainable, personalized travel briefing for English-speaking American travelers.
 
@@ -85,11 +85,13 @@ TravelShaper is explicitly **not** intended to:
 | Budget-aware ranking | Recommendations are shaped by the traveler's budget preference |
 | Place validation | gpt-4o validates departure/destination names, auto-corrects misspellings, rejects fictional places |
 | Preference validation | gpt-4o safety-classifies free-form preference text before it reaches the agent |
-| Phoenix observability | All LLM calls and tool invocations captured as OpenTelemetry traces |
-| Evaluation | Three metrics: user frustration, tool usage correctness, answer completeness |
+| Traceloop SDK instrumentation | In-process auto-instrumentation of LangChain / LangGraph / OpenAI; OTLP/HTTP export to `TRACELOOP_BASE_URL` |
+| Observe Agent (host) | Receives OTLP traces from the app and tails the JSON log file; forwards both to Observe cloud |
+| Observe LLM Explorer integration | Per-request association properties (`user_id`, `chat_id`, `destination`, `budget_mode`, `prompt_version`) for filtering and grouping |
+| Structured JSON logging | `logging_config.setup_logging()` writes one JSON record per line to `/app/logs/travelshaper.log` with `trace_id` / `span_id` fields for log/trace correlation |
 | Tests | 14 unit tests covering tool schemas, agent graph, and API endpoints + validation |
-| Docker | Dockerfile for the application; docker-compose.yml including Phoenix |
-| API | FastAPI server with `/chat`, `/chat/stream`, and `/health` endpoints |
+| Docker | Dockerfile for the application; docker-compose.yml runs only the app and bind-mounts `./logs:/app/logs` for the host-side agent |
+| API | FastAPI server with `/chat`, `/chat/stream`, `/health`, and `/feedback` endpoints |
 
 ### 7.2 Out of scope (this implementation)
 
@@ -98,7 +100,9 @@ TravelShaper is explicitly **not** intended to:
 | Booking or payment | TravelShaper recommends; it does not transact |
 | Multi-turn conversation memory | Current implementation is single-turn; session management is a production enhancement |
 | Dedicated train/ferry APIs | Guidance available via general web search but not through structured APIs |
-| User accounts or saved trips | No persistence layer beyond Phoenix traces |
+| User accounts or saved trips | No persistence layer beyond Observe traces / logs and local `feedback.jsonl` |
+| Automated trace evaluation | Removed during the Observe migration; pending reimplementation against Observe's trace store (prompts preserved in `docs/evaluation-prompts.md`) |
+| Phoenix-backed feedback sync | `/feedback` writes to local JSONL only; the response field `synced_to_phoenix` is preserved for the UI but always `false` |
 | Full frontend application | The browser UI is a single HTML file for demo use |
 | Real-time price alerts | No background jobs or push notifications |
 | Multi-language support | English for MVP |
@@ -264,21 +268,26 @@ The LLM decides which tools to call based on the user's message. Expected behavi
 
 ## 10. Evaluation Requirements
 
-### 10.1 User frustration evaluation
+> **Status:** the automated evaluation pipeline was removed during the
+> Observe migration and is pending reimplementation against Observe's
+> trace store. The prompt text for each metric is preserved in
+> `docs/evaluation-prompts.md` for that future implementation.
 
-Detect interactions where the agent's response would likely frustrate the user. Uses Phoenix's built-in `USER_FRUSTRATION_PROMPT_TEMPLATE`.
+### 10.1 User frustration evaluation (deferred)
 
-### 10.2 Tool usage correctness evaluation
+Detect interactions where the agent's response would likely frustrate the user. LLM-as-judge prompt preserved in `docs/evaluation-prompts.md`.
 
-Assess whether the agent selected appropriate tools and passed valid parameters. Custom LLM-as-judge prompt.
+### 10.2 Tool usage correctness evaluation (deferred)
 
-### 10.3 Answer completeness evaluation
+Assess whether the agent selected appropriate tools and passed valid parameters. Custom LLM-as-judge prompt preserved in `docs/evaluation-prompts.md`.
+
+### 10.3 Answer completeness evaluation (deferred)
 
 Distinguish intentionally scoped responses from unintentionally incomplete ones. Three-tier classification (complete/partial/incomplete) with scope awareness.
 
 ### 10.4 Trace volume
 
-A minimum of 11 diverse queries must be traced in Phoenix, covering full trip planning, partial requests, interest-heavy requests, cultural questions, edge cases, and past-date error handling.
+A minimum of 11 diverse queries must be traced in Observe, covering full trip planning, partial requests, interest-heavy requests, cultural questions, edge cases, and past-date error handling.
 
 ---
 
@@ -312,7 +321,10 @@ cd src
 ./setup.sh
 ```
 
-Exposes TravelShaper on port 8000, Phoenix on port 6006.
+Exposes TravelShaper on port 8000. The Observe Agent runs on the host (not
+in compose); the application reaches it at `TRACELOOP_BASE_URL` (default
+`http://localhost:4318`) and writes JSON logs to `./logs/travelshaper.log`,
+which the agent's filelog receiver tails.
 
 ---
 
@@ -322,14 +334,15 @@ This implementation is successful if:
 
 1. The agent responds to travel planning queries with flight, hotel, and cultural recommendations sourced from real APIs
 2. Three new tools (`search_flights`, `search_hotels`, `get_cultural_guide`) are integrated into the LangGraph agent
-3. Phoenix captures traces for all LLM calls and tool invocations
-4. At least 11 diverse queries are traced and exported
-5. Three evaluation metrics (user frustration, tool correctness, answer completeness) are configured and run against traces
-6. 14 unit tests pass
-7. A Dockerfile builds successfully
-8. A browser chat interface is served at `http://localhost:8000` with SSE streaming
-9. Place validation and preference validation protect the agent from bad input
-10. The README documents setup, usage, architecture, and design decisions
+3. The Traceloop SDK exports traces for all LLM calls and tool invocations to the Observe Agent, which forwards them to Observe cloud
+4. Structured JSON logs written to `/app/logs/travelshaper.log` carry `trace_id` and are tailed by the Observe Agent, so logs and traces correlate in Observe
+5. Per-request association properties (`user_id`, `chat_id`, `destination`, `budget_mode`, `prompt_version`) appear on traces in Observe's LLM Explorer
+6. At least 11 diverse queries are visible in Observe
+7. The unit test suite passes (no live network calls)
+8. A Dockerfile builds successfully
+9. A browser chat interface is served at `http://localhost:8000` with SSE streaming
+10. Place validation and preference validation protect the agent from bad input
+11. The README documents setup, usage, architecture, and design decisions
 
 ---
 

@@ -1,6 +1,15 @@
 # Evaluation Prompts — TravelShaper Travel Assistant
 
-**These are the exact prompts to use in the Phoenix evaluation pipeline.**
+**These are the exact prompts that drove the evaluation pipeline.**
+
+> **Note (Observe migration):** The automated evaluation pipeline (`evaluations/`
+> and `scripts/`) was removed when TravelShaper migrated from Phoenix to Observe
+> via Traceloop + the Observe Agent. The prompts and rationale in this document
+> are preserved verbatim so they can be reimplemented against Observe's
+> query/dataset features or an external eval runner. The Phoenix-specific
+> snippets below (`phoenix.evals`, `OpenAIModel`, `SpanEvaluations`,
+> `client.log_evaluations`, the `localhost:6006` UI) are illustrative of the
+> previous wiring and are not expected to run as-is against Observe.
 
 ---
 

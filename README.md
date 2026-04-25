@@ -2,13 +2,13 @@
 
 **AI travel planning assistant** — fill in a form, get an opinionated briefing with flights, hotels, cultural prep, and activity picks.
 
-Every recommendation includes a hyperlink and an explanation of *why* it was chosen. The agent runs two distinct voices depending on budget mode, and the entire request flow is instrumented with Arize Phoenix for observability.
+Every recommendation includes a hyperlink and an explanation of *why* it was chosen. The agent runs two distinct voices depending on budget mode, and the entire request flow is instrumented via the Traceloop SDK (OpenLLMetry) and forwarded to Observe through the Observe Agent.
 
 ---
 
 ## Before You Begin
 
-TravelShaper needs two things from the outside world: an OpenAI key to think with, and a SerpAPI key to search with. Everything else — the agent, the tools, the UI, the tracing stack — lives inside the project. Getting these keys configured correctly is the single most important step in setup, and the one most likely to cause confusion later if skipped.
+TravelShaper needs two things from the outside world: an OpenAI key to think with, and a SerpAPI key to search with. Everything else — the agent, the tools, the UI — lives inside the project. Tracing is optional: if no collector is configured, spans are silently dropped and the app continues to serve requests.
 
 ### 1. Create your environment file
 
@@ -22,41 +22,33 @@ Open `.env` in any editor and fill in your keys:
 ```
 OPENAI_API_KEY=sk-...
 SERPAPI_API_KEY=...
-PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006/v1/traces
+TRACELOOP_BASE_URL=http://localhost:4318
 ```
 
 **Where to get keys:**
 
 - **OpenAI** (required) — [platform.openai.com/api-keys](https://platform.openai.com/api-keys). The agent cannot function without this. The validation classifiers in `api.py` also use OpenAI models via LangChain's `ChatOpenAI`.
 - **SerpAPI** (required for flights, hotels, and cultural guide) — [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key). The free tier provides 250 searches per month, which supports roughly 60–125 full trip briefings. Without this key, the agent falls back to DuckDuckGo for everything — functional, but limited.
-- **Phoenix endpoint** — leave the default. It points to the Phoenix container that Docker Compose starts automatically. Only change this if you are running Phoenix on a different host.
+- **`TRACELOOP_BASE_URL`** — points at the OTLP HTTP endpoint of an Observe Agent (default `localhost:4318`). Leave the default if you are running an Observe Agent on the host. Inside Docker the compose file rewrites this to `host.docker.internal:4318`.
 
 The `.env` file is listed in `.gitignore` and will never be committed. If you see an auth error later, this is the first place to check.
 
-### 2. Trace destination (optional)
+### 2. Observe Agent (optional)
 
-Traces are sent to Arize Phoenix by default. To change the destination,
-edit `OTEL_DESTINATION` in `src/tracing.yaml`:
+TravelShaper exports two telemetry signals to the [Observe
+Agent](https://docs.observeinc.com/) running on your host:
 
-**Phoenix (local dev — default, no changes needed):**
-```yaml
-OTEL_DESTINATION: phoenix
-```
+- **OTLP traces** on `localhost:4318` (HTTP) — emitted by the Traceloop SDK
+- **Structured JSON logs** in `./logs/travelshaper.log` — written by the
+  Python `logging` module and tailed by the Observe Agent's filelog receiver
 
-**Arize AX (cloud):**
-```yaml
-OTEL_DESTINATION: arize
-```
-Then set `ARIZE_SPACE_ID` and `ARIZE_API_KEY` in your `.env` file.
-Get credentials from [app.arize.com/account/api-keys](https://app.arize.com/account/api-keys).
+Configure infrastructure-level resource attributes (`deployment.environment`,
+`host.name`, cluster IDs, etc.) in the agent's resource processor — the app
+only sets `service.name` and `service.version`. This means the same image
+runs in dev, staging, and prod without rebuilding.
 
-**Custom OTLP (Cribl, Honeycomb, Grafana, Datadog, etc.):**
-```yaml
-OTEL_DESTINATION: custom
-```
-Then set `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_AUTH_TOKEN` in `.env`.
-
-After changing `tracing.yaml`, rebuild: `docker compose build && docker compose up -d`
+If you do not run an Observe Agent, traces are dropped harmlessly and the
+log file simply accumulates on disk.
 
 ---
 
@@ -66,7 +58,7 @@ There are two ways to run TravelShaper. Pick the one that fits your situation �
 
 ### Option A: Docker Compose (recommended)
 
-This is the fastest path. Docker handles Python versions, dependencies, and Phoenix in one command. You do not need a virtual environment.
+This is the fastest path. Docker handles Python versions and dependencies in one command. You do not need a virtual environment.
 
 ```bash
 cd src
@@ -74,12 +66,13 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The setup script checks prerequisites (it detects both `docker compose` v2 and legacy `docker-compose`), prompts for API keys if `.env` does not exist yet, builds the containers, and starts both services. When it finishes:
+The setup script checks prerequisites (it detects both `docker compose` v2 and legacy `docker-compose`), prompts for API keys if `.env` does not exist yet, builds the container, and starts the service. When it finishes:
 
 | Service | URL |
 |---------|-----|
 | TravelShaper (app + API) | [http://localhost:8000](http://localhost:8000) |
-| Phoenix (tracing UI) | [http://localhost:6006](http://localhost:6006) |
+
+The Observe Agent runs on the host (or as a separate sidecar) and is **not** managed by docker-compose. The compose file bind-mounts `./logs:/app/logs` so the agent's filelog receiver can tail `travelshaper.log` from outside the container.
 
 To stop everything:
 
@@ -118,26 +111,17 @@ uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 
 The app is now running at [http://localhost:8000](http://localhost:8000).
 
-**Phoenix tracing** (optional in venv mode): the tracing client packages
-(`arize-phoenix-otel`, `openinference-instrumentation-langchain`) are included
-in `pyproject.toml` and installed by `poetry install`. To run the Phoenix
-server and evaluations locally, also install:
-
-```bash
-pip install arize-phoenix arize-phoenix-evals
-```
-
-You will also need to run the Phoenix server separately. The simplest way is Docker:
-
-```bash
-docker run -p 6006:6006 arizephoenix/phoenix:latest
-```
+**Tracing** (optional in venv mode): the Traceloop SDK is a regular
+dependency installed by `poetry install`. With `TRACELOOP_BASE_URL`
+pointing at a running Observe Agent on `localhost:4318`, spans are
+exported automatically. With nothing listening on that port, the SDK
+buffers and drops spans without affecting the request path.
 
 ---
 
 ## Running Tests
 
-Here is the thing about the tests that matters most: they are entirely self-contained. All 14 tests use mocked external calls. They do not need API keys, a running server, or Docker. They need only the right Python packages available to import.
+Here is the thing about the tests that matters most: they are entirely self-contained. Every test uses mocked external calls — no API keys, running server, or Docker required. They need only the right Python packages available to import.
 
 The principle is simple: every command that runs Python code should execute inside either a container or an activated virtual environment. Never bare system Python.
 
@@ -162,7 +146,7 @@ docker compose exec travelshaper pytest tests/ -v
 
 If the container is not already running, start it first with `docker compose up -d`, then run the command above.
 
-Expected output: **14 tests passing**.
+Expected output: a passing run of the unit suite (no live network calls).
 
 ---
 
@@ -213,7 +197,9 @@ curl -s -X POST http://localhost:8000/chat \
 **`POST /feedback`** — Submit user feedback on a briefing. Requires `run_id`
 (from the `/chat` response or SSE `done` event) and `score` (1 or -1).
 Optional `session_id` and `comment` (max 1000 chars). Feedback is stored
-locally and best-effort synced to Phoenix.
+locally as JSONL. The legacy `synced_to_phoenix` field in the response is
+preserved for the UI but is always `false` — Observe-side annotation will
+need to be reimplemented post-migration.
 
 ```bash
 curl -s -X POST http://localhost:8000/feedback \
@@ -225,13 +211,11 @@ curl -s -X POST http://localhost:8000/feedback \
 
 ---
 
-## Running Traces and Evaluations
+## Running Traces
 
-Traces are generated by running real queries against the live API. Do this after starting the full Docker Compose stack (or after starting both the app and Phoenix in venv mode).
+Traces are generated by running real queries against the live API. Do this after starting the Docker Compose stack (or the app in venv mode) with an Observe Agent listening on `localhost:4318`.
 
 ### Generate traces
-
-The trace script must be run from within the `src/` directory, since it calls Python modules with relative imports:
 
 ```bash
 cd src
@@ -239,7 +223,7 @@ chmod +x run_traces.sh
 ./run_traces.sh
 ```
 
-This fires 11 queries covering every tool combination, both budget voices, auto-correction, vague inputs, past-date error handling, and edge cases. All dates in the queries are computed dynamically relative to today, so the script never goes stale. Each query generates a trace visible in Phoenix at [http://localhost:6006](http://localhost:6006).
+This fires 11 queries covering every tool combination, both budget voices, auto-correction, vague inputs, past-date error handling, and edge cases. All dates in the queries are computed dynamically relative to today, so the script never goes stale. Each query produces a trace that the Observe Agent forwards to your Observe workspace.
 
 You can optionally pass a custom base URL:
 
@@ -247,22 +231,16 @@ You can optionally pass a custom base URL:
 ./run_traces.sh http://localhost:8000
 ```
 
-### Run evaluations
+### Evaluations
 
-```bash
-cd src
-python -m evaluations.run_evals
-```
+The Phoenix-based eval pipeline (`User Frustration`, `Tool Usage Correctness`,
+`Answer Completeness`) was removed during the Observe migration because it
+depended on `phoenix.evals.llm_classify`. The prompts are preserved in
+[docs/evaluation-prompts.md](src/docs/evaluation-prompts.md) and can be
+reimplemented against Observe's query/dataset features or an external
+eval runner.
 
-This runs three LLM-as-judge metrics against the collected traces:
-
-- **User Frustration** — uses Phoenix's built-in `USER_FRUSTRATION_PROMPT_TEMPLATE` (the `frustration.py` file in `evaluations/metrics/` contains a custom reference prompt but it is not used in production)
-- **Tool Usage Correctness** — custom LLM-as-judge prompt
-- **Answer Completeness** — custom LLM-as-judge prompt with scope awareness
-
-Results are logged back to Phoenix and visible in the Evaluations tab. A `frustrated_interactions` dataset is automatically created from any traces flagged as frustrated.
-
-See [docs/trace-queries.md](src/docs/trace-queries.md) for the full query list and [docs/evaluation-prompts.md](src/docs/evaluation-prompts.md) for evaluation methodology.
+See [docs/trace-queries.md](src/docs/trace-queries.md) for the full query list.
 
 ---
 
@@ -278,19 +256,11 @@ src/
 │   ├── flights.py                  # search_flights (SerpAPI Google Flights)
 │   ├── hotels.py                   # search_hotels (SerpAPI Google Hotels)
 │   └── cultural_guide.py          # get_cultural_guide (scoped Google search)
-├── evaluations/
-│   ├── run_evals.py                # Phoenix evaluation runner (3 metrics)
-│   └── metrics/
-│       ├── frustration.py          # Reference frustration prompt (production uses Phoenix built-in)
-│       ├── answer_completeness.py  # ANSWER_COMPLETENESS_PROMPT
-│       └── tool_correctness.py     # TOOL_CORRECTNESS_PROMPT
-├── scripts/
-│   ├── export_spans.py             # Export Phoenix spans to CSV
-│   └── sync_feedback.py            # Batch-sync feedback.jsonl → Phoenix annotations
+├── logging_config.py               # JSON logging + stderr handlers
 ├── tests/
-│   ├── test_tools.py               # 4 tool tests
-│   ├── test_agent.py               # 2 agent graph tests
-│   └── test_api.py                 # 18 endpoint, validation, and feedback tests
+│   ├── test_tools.py               # tool tests
+│   ├── test_agent.py               # agent graph + Traceloop init tests
+│   └── test_api.py                 # endpoint, validation, and feedback tests
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── PRD.md
@@ -299,12 +269,11 @@ src/
 │   ├── docker-spec.md
 │   ├── evaluation-prompts.md
 │   ├── trace-queries.md
-│   ├── implementation-plan.md
 │   └── presentation-outline.md
 ├── Dockerfile
 ├── docker-compose.yml
 ├── pyproject.toml
-├── run_traces.sh                   # 11 trace queries + span export
+├── run_traces.sh                   # 11 trace queries
 ├── setup.sh                        # One-command setup (Docker path)
 ├── RUNNING.md                      # Extended setup guide (some sections outdated — prefer this README)
 └── CHANGELOG.md
@@ -369,8 +338,9 @@ There is a pattern in how TravelShaper makes its choices, and the pattern is wor
 - **Voice routing as a dedicated graph node** — `route_and_inject` runs once at graph entry to select and inject the system prompt into message state. All subsequent `llm_call` invocations see the prompt already in history — no re-injection needed.
 - **Place validation before agent** — gpt-4o catches misspellings and rejects fictional places before the expensive agent runs. A 1-second validation call saves 30 seconds of wasted agent time. Validation only runs when `departure` and `destination` fields are explicitly provided in the request body.
 - **Single-turn design** — each request is independent. This is a deliberate product boundary, not a gap.
-- **All tracing through LangChain instrumentation** — only `agent.py._init_tracing()` imports OTEL packages. `api.py` uses `RunnableConfig` metadata to tag request-level attributes (destination, departure, budget mode) which the LangChain instrumentor propagates to all child spans. Swapping trace backends (e.g., LangSmith, Datadog) means changing one function.
-- **Validation classifiers use LangChain `ChatOpenAI`** — the place and preference validators in `api.py` call `gpt-4o` through `langchain-openai` rather than the raw OpenAI SDK. This makes validation LLM calls visible in Phoenix traces alongside agent spans.
+- **All tracing through the Traceloop SDK (OpenLLMetry)** — `agent.py._init_tracing()` calls `Traceloop.init()`, which auto-instruments LangChain and OpenAI and exports OTLP spans to `TRACELOOP_BASE_URL`. `api.py` calls `Traceloop.set_association_properties()` so session_id, run_id, destination, budget_mode, and prompt_version flow through every span (and power filtering in Observe's LLM Explorer).
+- **Validation classifiers use LangChain `ChatOpenAI`** — the place and preference validators in `api.py` call `gpt-4o` through `langchain-openai` rather than the raw OpenAI SDK. Their spans appear alongside the agent's in Observe's trace explorer.
+- **Logs and traces correlate via shared trace_id** — Python's `logging` module writes structured JSON records to `/app/logs/travelshaper.log`. The Observe Agent tails the file with its filelog receiver and uses the trace_id key to correlate log entries with their parent traces.
 
 ---
 
@@ -383,6 +353,8 @@ There is a pattern in how TravelShaper makes its choices, and the pattern is wor
 - Single-turn: no conversation memory between requests.
 - SerpAPI free tier supports ~60–125 full briefings per month.
 - Voice routing uses keyword matching — the budget voice triggers on `save money`, `budget`, `cheapest`, or `spend as little` appearing in the message. Synonyms like "frugal" or "inexpensive" will not trigger it and will default to the full-experience voice.
+- The automated evaluation pipeline (`evaluations/`) was removed during the Observe migration because it depended on Phoenix's `llm_classify`. Eval prompts are preserved in [docs/evaluation-prompts.md](src/docs/evaluation-prompts.md) and need to be reimplemented against Observe or an external eval runner.
+- `/feedback` no longer annotates the originating trace. The endpoint still records to `feedback.jsonl` but `synced_to_phoenix` in the response is always `false`.
 
 ---
 
@@ -396,13 +368,11 @@ There is a pattern in how TravelShaper makes its choices, and the pattern is wor
 
 **Poor or incomplete results** — include origin, destination, dates, and budget in your request. Check SerpAPI usage (free tier: 250 searches/month). Try well-known destinations first.
 
-**Finding traces in Phoenix** — Set `TRAVELSHAPER_DEBUG=true` in your `.env` file. The `/chat` response will include a `debug.trace_url` that links directly to the trace in Phoenix. For SSE streaming, the `done` event includes a `run_id` you can search for in the Phoenix UI.
+**Finding traces in Observe** — set `TRAVELSHAPER_DEBUG=true` in your `.env`. The `/chat` response includes a `debug.run_id` and a `debug.trace_url` of the form `trace:<run_id>`. Search for that run_id in the Observe Trace Explorer.
 
-**Missing traces in Phoenix** — confirm Phoenix is running. If using Docker Compose, both services start together. If using a venv, you need to start Phoenix separately. Run at least one `/chat` query, then refresh the Phoenix UI at [http://localhost:6006](http://localhost:6006).
+**Missing traces in Observe** — confirm an Observe Agent is running on the host with an OTLP receiver on port 4318. Inside Docker, `TRACELOOP_BASE_URL` defaults to `http://host.docker.internal:4318` so traffic crosses the container boundary correctly on Mac/Windows; on Linux you may need to add `--add-host` or run the agent in the same Docker network. Check the agent's logs for ingest activity, then look in the Observe Trace Explorer.
 
-**`ModuleNotFoundError: No module named 'phoenix'`** — the tracing client packages are installed by `poetry install`. If you need the full Phoenix server locally, install it with: `pip install arize-phoenix arize-phoenix-evals`. In Docker mode, Phoenix runs in its own container.
-
-**`run_traces.sh` fails with import errors** — make sure you are running the script from inside the `src/` directory. The script calls `python3 -m scripts.export_spans` and `python3 -m evaluations.run_evals`, which require `src/` as the working directory for Python's module resolution to work.
+**Missing logs in Observe** — confirm the Observe Agent's filelog receiver is configured to tail `./logs/travelshaper.log` (mounted at `/app/logs/travelshaper.log` inside the container). The file is created lazily on first log write — make at least one request, then check that `./logs/travelshaper.log` exists on the host.
 
 ---
 

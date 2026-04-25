@@ -34,9 +34,9 @@ Each prompt has a version constant defined in `agent.py`:
 - `FULL_EXPERIENCE_PROMPT_VERSION = "full_experience_v1"`
 
 The `_PROMPT_REGISTRY` dict maps version strings to prompt text. When you edit
-a prompt, bump the version suffix. The version is recorded as
-`travelshaper.prompt_version` on every Phoenix trace, enabling A/B comparison
-of eval scores across prompt revisions.
+a prompt, bump the version suffix. The version is attached to every span via
+Traceloop's association properties as `prompt_version`, enabling A/B comparison
+across prompt revisions in the Observe LLM Explorer.
 
 ---
 

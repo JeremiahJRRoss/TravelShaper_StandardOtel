@@ -40,18 +40,16 @@ pip install poetry==1.8.2
 ### 1d. Install project dependencies
 
 ```bash
+# Runtime only
+poetry install
+
+# Or, with the test runner
 poetry install -E dev
 ```
 
-#### Phoenix tracing packages (optional — for running the Phoenix server locally)
-
-The tracing client packages (`arize-phoenix-otel`,
-`openinference-instrumentation-langchain`) are installed by `poetry install`.
-To run the Phoenix server and evaluations locally, also install:
-
-```bash
-pip install arize-phoenix arize-phoenix-evals
-```
+The Traceloop SDK (OpenLLMetry) and its LangChain auto-instrumentation are
+declared in `pyproject.toml` and installed automatically. The previous
+optional extras (`phoenix`, `arize`, `custom`) are gone.
 
 ### 1e. Configure environment variables
 
@@ -59,7 +57,9 @@ pip install arize-phoenix arize-phoenix-evals
 cp .env.example .env
 ```
 
-Open `.env` and fill in your keys.
+Open `.env` and fill in your keys. Tracing is configured via
+`TRACELOOP_BASE_URL` (default `http://localhost:4318`), which points at
+the host-side **Observe Agent** OTLP/HTTP receiver.
 
 ---
 
@@ -71,7 +71,12 @@ Open `.env` and fill in your keys.
 uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Option B — Docker Compose (recommended for full stack)
+### Option B — Docker Compose
+
+`docker-compose.yml` defines a single `travelshaper` service. The Observe
+Agent runs on the **host** (not in compose) and is user-managed. The
+container bind-mounts `./logs:/app/logs` so the host-side Observe Agent
+can tail `/app/logs/travelshaper.log` (structured JSON).
 
 ```bash
 docker compose up --build
@@ -80,7 +85,9 @@ docker compose up --build
 | Service | URL |
 |---------|-----|
 | TravelShaper API | http://localhost:8000 |
-| Phoenix Tracing UI | http://localhost:6006 |
+
+Traces are exported via OTLP/HTTP to `TRACELOOP_BASE_URL` and surface in
+**Observe** — there is no local tracing UI.
 
 ### Option C — One-command setup
 
@@ -93,19 +100,20 @@ chmod +x setup.sh
 
 ## 3. Running the Tests
 
-### All 14 tests (recommended)
+### Run the unit suite (recommended)
 
 ```bash
 pytest tests/ -v
 ```
 
-Expected output: **14 passed** (2 agent structure tests, 8 API/validation tests, 4 tool tests).
+The unit suite (~22-24 tests) covers agent structure, API/validation,
+tool behaviour, and Traceloop SDK initialisation.
 
 > **No API keys are required to run tests.** All external calls are mocked.
 
 ---
 
-## 4. Generating Phoenix Traces
+## 4. Generating Traces
 
 ### Run all 11 trace queries automatically
 
@@ -116,19 +124,21 @@ chmod +x run_traces.sh
 
 The script runs 11 queries covering every tool combination, both budget voices, place auto-correction, past-date error handling, and edge cases. All dates are computed dynamically relative to today.
 
-View traces in the Phoenix UI at **http://localhost:6006** after running queries.
+The Traceloop SDK exports OTLP/HTTP spans to `TRACELOOP_BASE_URL` (the
+host's Observe Agent on `:4318` by default), which forwards them — along
+with tailed structured logs — to **Observe cloud**. View results in your
+Observe workspace.
 
 ---
 
-## 5. Running Evaluations
+## 5. Evaluations
 
-```bash
-python -m evaluations.run_evals
-```
-
-Three metrics: User Frustration (Phoenix built-in), Tool Usage Correctness (custom), Answer Completeness (custom).
-
-Results are logged back to Phoenix and visible in the **Evaluations** tab.
+The previous in-repo eval pipeline (`evaluations/`) and the Phoenix-only
+helper scripts (`scripts/export_spans.py`, `scripts/sync_feedback.py`)
+were removed during the Observe migration. The judge prompts that powered
+those metrics are preserved as reference material in
+[`docs/evaluation-prompts.md`](evaluation-prompts.md), to be re-used
+inside Observe (Monitors / LLM-as-judge) or any external eval harness.
 
 ---
 
@@ -155,22 +165,19 @@ src/
 │   ├── hotels.py                   # search_hotels tool
 │   └── cultural_guide.py          # get_cultural_guide tool
 ├── tests/
-│   ├── test_tools.py               # 4 tool unit tests (mocked)
-│   ├── test_agent.py               # 2 agent structure tests
-│   └── test_api.py                 # 8 API endpoint + validation tests
-├── evaluations/
-│   ├── run_evals.py                # Phoenix evaluation runner (3 metrics)
-│   └── metrics/
-│       ├── frustration.py          # Reference frustration prompt
-│       ├── answer_completeness.py  # ANSWER_COMPLETENESS_PROMPT
-│       └── tool_correctness.py     # TOOL_CORRECTNESS_PROMPT
-├── scripts/
-│   └── export_spans.py             # Export Phoenix spans to CSV
-├── run_traces.sh                   # 11 trace queries for Phoenix tracing
+│   ├── test_tools.py               # tool unit tests (mocked)
+│   ├── test_agent.py               # agent structure tests
+│   ├── test_api.py                 # API endpoint + validation tests
+│   └── test_traceloop.py           # Traceloop SDK initialisation test
+├── docs/
+│   └── evaluation-prompts.md       # Reference judge prompts (post-migration)
+├── logs/                           # Bind-mounted into Docker as /app/logs
+│   └── travelshaper.log            # Structured JSON; tailed by Observe Agent
+├── run_traces.sh                   # 11 trace queries to drive trace generation
 ├── setup.sh                        # One-command setup (Docker path)
 ├── Dockerfile                      # Container build
-├── docker-compose.yml              # TravelShaper + Phoenix stack
-├── pyproject.toml                  # Dependencies
+├── docker-compose.yml              # Single-service compose (Observe Agent runs on host)
+├── pyproject.toml                  # Dependencies (Traceloop SDK, no extras)
 └── .env.example                    # Environment variable template
 ```
 
@@ -187,10 +194,14 @@ Check your `.env` file.
 **Tests fail to collect**
 Make sure you are running from `src/` with the venv active. Then run `pytest tests/ -v`.
 
-**Phoenix UI shows no traces**
-Run `./run_traces.sh` after starting the full `docker compose up` stack.
+**No traces in Observe**
+Traces are only generated when real queries hit the live API. Confirm the
+**Observe Agent** is running on the host and listening on OTLP/HTTP
+`:4318`, that `TRACELOOP_BASE_URL` matches, and then run `./run_traces.sh`
+against the live server.
 
-**`ModuleNotFoundError: No module named 'phoenix'`**
-The tracing client packages are installed by `poetry install`. If you need
-the Phoenix server or eval runner locally, install them with pip:
-`pip install arize-phoenix arize-phoenix-evals`
+**No logs reaching Observe**
+Check that `./logs/travelshaper.log` is being written (the app logs
+structured JSON there) and that the Observe Agent is configured to tail
+that file. In Docker, the host directory `./logs` is bind-mounted to
+`/app/logs` inside the container.

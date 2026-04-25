@@ -1,8 +1,9 @@
 #!/bin/bash
 # ============================================================
-# TravelShaper — Phoenix trace generator
-# Fires all 10 queries against the running server and generates
-# traces viewable in Phoenix at http://localhost:6006
+# TravelShaper — trace generator
+# Fires 11 queries against the running server. Spans are exported via
+# Traceloop / OTLP to whatever collector TRACELOOP_BASE_URL points at —
+# typically the local Observe Agent. Traces appear in the Observe UI.
 #
 # Usage:
 #   ./run_traces.sh              # default: http://localhost:8000
@@ -33,9 +34,8 @@ Q11_DEP=$(date -d "-30 days" +%Y-%m-%d)   # past — error handling test
 Q11_RET=$(date -d "-23 days" +%Y-%m-%d)
 
 echo ""
-echo "  TravelShaper — Phoenix Trace Generator"
+echo "  TravelShaper — Trace Generator"
 echo "  Target:  ${BASE_URL}"
-echo "  Phoenix: http://localhost:6006"
 echo "  Queries: 11"
 echo "  Dates generated relative to: $(date +%Y-%m-%d)"
 echo ""
@@ -194,11 +194,7 @@ fire 11 "Boston → Paris · PAST DATES · Error handling test" \
 
 # ============================================================
 echo ""
-echo "  Exporting spans to CSV..."
-python3 -m scripts.export_spans || echo "  (Span export skipped — Phoenix may not be reachable)"
-echo ""
 echo "  All 11 queries complete."
-echo "  View traces → http://localhost:6006"
-echo "  Run evals  → python3 -m evaluations.run_evals"
-echo "  Sync feedback → python3 -m scripts.sync_feedback"
+echo "  View traces in the Observe UI (the Observe Agent forwards them"
+echo "  from TRACELOOP_BASE_URL to your Observe workspace)."
 echo ""

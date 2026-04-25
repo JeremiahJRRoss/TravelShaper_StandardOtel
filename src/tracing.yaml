@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────
+# TravelShaper Trace Routing Configuration
+# ─────────────────────────────────────────────────────────────────────────
+#
+# This file controls where OpenTelemetry traces are sent.
+# Edit OTEL_DESTINATION to switch backends. Secrets use ${ENV_VAR} syntax
+# and are resolved from the environment at runtime.
+#
+# Supported destinations:
+#   phoenix  — Local or self-hosted Arize Phoenix (default)
+#   arize    — Arize AX cloud platform
+#   custom   — Any OTLP-compatible endpoint (Cribl, Honeycomb, Grafana, etc.)
+#
+# After changing this file, rebuild the Docker image:
+#   docker compose build && docker compose up -d
+#
+# ─────────────────────────────────────────────────────────────────────────
+
+OTEL_DESTINATION: phoenix
+
+# ─── Phoenix (local/self-hosted) ─────────────────────────────────────────
+phoenix:
+  endpoint: http://phoenix:6006/v1/traces
+  project_name: travelshaper
+  # For Phoenix Cloud, uncomment and set PHOENIX_API_KEY in .env:
+  # api_key: ${PHOENIX_API_KEY}
+
+# ─── Arize AX (cloud) ───────────────────────────────────────────────────
+# Get credentials from https://app.arize.com/account/api-keys
+# API key must start with "ak-"
+arize:
+  space_id: ${ARIZE_SPACE_ID}
+  api_key: ${ARIZE_API_KEY}
+  project_name: travelshaper
+  # Default: gRPC to otlp.arize.com:443
+  # If gRPC is blocked by your firewall, uncomment for HTTP:
+  # endpoint: https://otlp.arize.com/v1/traces
+
+# ─── Custom (Cribl, Honeycomb, Grafana, Datadog, etc.) ───────────────────
+# Works with any OTLP-compatible receiver. No vendor packages needed.
+custom:
+  endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+  service_name: travelshaper
+
+  # Protocol: how trace data is serialized and transported.
+  #
+  #   http/protobuf  — HTTP POST, binary protobuf body. (recommended)
+  #                    Works through firewalls. No extra Python deps.
+  #
+  #   grpc           — Persistent HTTP/2 streaming. Fastest, but may be
+  #                    blocked by proxies. Adds grpcio (~30MB) dependency.
+  #
+  #   http/json      — HTTP POST, JSON body. Slowest (~5x larger payloads)
+  #                    but zero binary deps. Useful for debugging or when
+  #                    protobuf causes dependency conflicts.
+  #
+  protocol: http/protobuf
+
+  # Auth headers sent with every OTLP export request.
+  # Use ${ENV_VAR} for secrets — they resolve from .env at runtime.
+  headers:
+    authorization: Bearer ${OTEL_AUTH_TOKEN}
+
+# ─── Debug ───────────────────────────────────────────────────────────────
+# When enabled, trace URLs appear in /chat responses and SSE done events.
+debug:
+  enabled: false
+  # Phoenix UI URL (browser-accessible, may differ from collector endpoint)
+  phoenix_ui_url: http://localhost:6006

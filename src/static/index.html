@@ -1,0 +1,1351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TravelShaper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Cormorant+Garamond:ital,wght@0,600;0,700;1,400;1,600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --black:    #0A0A0A;
+      --off-black:#111111;
+      --white:    #FAFAFA;
+      --cream:    #F4F1EB;
+      --mid:      #888880;
+      --rule:     #D8D4CB;
+      --accent:   #FF7A00;
+      --accent2:  #E63535;
+      --teal:     #006D77;
+      --teal-bg:  #E6F4F5;
+      --blue:     #0F4C81;
+      --blue-bg:  #EBF2FA;
+
+      --font-display: 'Bebas Neue', 'Arial Black', sans-serif;
+      --font-serif:   'Cormorant Garamond', Georgia, serif;
+      --font-body:    'DM Sans', system-ui, sans-serif;
+
+      --body-size: 22px;
+      --body-lh:   1.9;
+
+      --max:    1200px;
+      --gutter: clamp(20px, 5vw, 60px);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--white);
+      color: var(--black);
+      font-family: var(--font-body);
+      font-size: var(--body-size);
+      line-height: var(--body-lh);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ══════════════════════════════════════
+       HEADER
+    ══════════════════════════════════════ */
+    header {
+      background: var(--black);
+      height: clamp(60px, 8vw, 80px);
+      display: flex;
+      align-items: center;
+      padding: 0 var(--gutter);
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+    }
+
+    .logo {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+    }
+
+    .logo-name {
+      font-family: var(--font-display);
+      font-size: clamp(26px, 4vw, 38px);
+      letter-spacing: 3px;
+      color: var(--white);
+      line-height: 1;
+    }
+
+    .logo-rule {
+      width: 1px;
+      height: 20px;
+      background: rgba(255,255,255,0.25);
+    }
+
+    .logo-sub {
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 300;
+      color: rgba(255,255,255,0.45);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .header-ver {
+      font-family: var(--font-display);
+      font-size: 18px;
+      letter-spacing: 2px;
+      color: var(--accent);
+    }
+
+    /* ══════════════════════════════════════
+       PAGE
+    ══════════════════════════════════════ */
+    .page {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: clamp(32px, 6vw, 72px) var(--gutter) 120px;
+      display: grid;
+      grid-template-columns: 1fr clamp(240px, 25vw, 320px);
+      gap: clamp(24px, 4vw, 48px);
+      align-items: start;
+    }
+
+    .main-col { min-width: 0; }
+
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    /* ══════════════════════════════════════
+       FORM — TRIBECA LAYOUT
+    ══════════════════════════════════════ */
+
+    /* Big editorial hero headline */
+    .form-hero {
+      margin-bottom: clamp(32px, 5vw, 56px);
+      border-top: 3px solid var(--black);
+      padding-top: 24px;
+    }
+
+    .form-kicker {
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+
+    .form-headline {
+      font-family: var(--font-display);
+      font-size: clamp(80px, 13vw, 152px);
+      line-height: 0.92;
+      letter-spacing: 2px;
+      color: var(--black);
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    .form-headline em {
+      font-family: var(--font-serif);
+      font-style: italic;
+      font-size: 0.65em;
+      letter-spacing: 0;
+      color: var(--mid);
+      display: block;
+      line-height: 1.2;
+    }
+
+    .form-desc {
+      font-size: 19px;
+      font-weight: 300;
+      color: var(--mid);
+      max-width: 520px;
+      line-height: 1.7;
+      border-left: 2px solid var(--accent);
+      padding-left: 16px;
+    }
+
+    /* Error */
+    .error-box {
+      background: #fff2f2;
+      border-left: 4px solid var(--accent2);
+      padding: 14px 18px;
+      color: var(--accent2);
+      font-size: 18px;
+      font-weight: 500;
+      margin-bottom: 28px;
+      display: none;
+      line-height: 1.5;
+    }
+
+    /* Correction banner */
+    .correction-banner {
+      background: var(--teal-bg);
+      border-left: 4px solid var(--teal);
+      padding: 14px 18px;
+      color: var(--teal);
+      font-size: 18px;
+      font-weight: 500;
+      margin-bottom: 20px;
+      display: none;
+      line-height: 1.5;
+    }
+
+    /* Form grid */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(16px, 2.5vw, 24px);
+    }
+
+    .fg { display: flex; flex-direction: column; gap: 8px; }
+    .fg.full { grid-column: 1 / -1; }
+
+    .fg label {
+      font-family: var(--font-body);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: var(--black);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .fg label .req { color: var(--accent); font-size: 16px; line-height: 1; }
+    .fg label .opt { font-weight: 300; letter-spacing: 0; text-transform: none; color: var(--mid); font-size: 10px; }
+
+    input[type="text"],
+    input[type="date"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 14px 16px;
+      border: 1.5px solid var(--rule);
+      border-radius: 0;
+      background: var(--white);
+      color: var(--black);
+      font-family: var(--font-body);
+      font-size: 19px;
+      font-weight: 400;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--black);
+      box-shadow: 3px 3px 0 var(--black);
+    }
+
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7'%3E%3Cpath d='M0 0l6 7 6-7z' fill='%230A0A0A'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+      cursor: pointer;
+    }
+
+    .field-note {
+      font-size: 11px;
+      color: var(--mid);
+      line-height: 1.4;
+    }
+
+    /* Budget toggle */
+    .budget-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1.5px solid var(--rule);
+    }
+
+    .bopt { position: relative; }
+    .bopt input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .bopt label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px;
+      cursor: pointer;
+      background: var(--white);
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--mid);
+      border-right: 1.5px solid var(--rule);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-size: 15px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .bopt:last-child label { border-right: none; }
+    .bopt input:checked + label {
+      background: var(--black);
+      color: var(--white);
+    }
+
+    /* Interest chips */
+    .chips {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .chip { position: relative; }
+    .chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .chip label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 11px 13px;
+      border: 1.5px solid var(--rule);
+      cursor: pointer;
+      background: var(--white);
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--mid);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      transition: all 0.12s;
+      white-space: nowrap;
+    }
+    .chip input:checked + label {
+      background: var(--black);
+      border-color: var(--black);
+      color: var(--white);
+    }
+
+    /* Preferences */
+    textarea { resize: vertical; min-height: 90px; line-height: 1.55; }
+    .char-wrap { position: relative; }
+    .char-count {
+      position: absolute;
+      bottom: 10px; right: 12px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--mid);
+      pointer-events: none;
+    }
+
+    .form-divider {
+      grid-column: 1 / -1;
+      height: 1px;
+      background: var(--rule);
+      margin: 8px 0;
+    }
+
+    /* CTA button — brutalist */
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 40px;
+      background: var(--accent);
+      color: var(--white);
+      border: none;
+      font-family: var(--font-display);
+      font-size: 30px;
+      letter-spacing: 3px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s, box-shadow 0.1s;
+      margin-top: 32px;
+      box-shadow: 4px 4px 0 var(--black);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #e86e00;
+      transform: translate(-2px, -2px);
+      box-shadow: 6px 6px 0 var(--black);
+    }
+    .btn-primary:active:not(:disabled) { transform: none; box-shadow: 2px 2px 0 var(--black); }
+    .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      background: transparent;
+      color: var(--black);
+      border: 1.5px solid var(--black);
+      font-family: var(--font-display);
+      font-size: 18px;
+      letter-spacing: 2px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .btn-ghost:hover { background: var(--black); color: var(--white); }
+
+    /* ══════════════════════════════════════
+       LOADING
+    ══════════════════════════════════════ */
+    #screen-loading {
+      padding: clamp(40px, 8vw, 80px) 0;
+    }
+
+    .loading-hero {
+      border-top: 3px solid var(--black);
+      padding-top: 24px;
+      margin-bottom: 48px;
+    }
+
+    .loading-headline {
+      font-family: var(--font-display);
+      font-size: clamp(72px, 11vw, 132px);
+      line-height: 0.95;
+      letter-spacing: 2px;
+      color: var(--black);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .loading-sub {
+      font-size: 18px;
+      font-weight: 300;
+      color: var(--mid);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .spinner-bar {
+      width: 100%;
+      height: 3px;
+      background: var(--rule);
+      margin: 32px 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .spinner-bar::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -40%;
+      width: 40%;
+      height: 100%;
+      background: var(--accent);
+      animation: barSlide 1.4s ease-in-out infinite;
+    }
+
+    @keyframes barSlide {
+      0%   { left: -40%; }
+      100% { left: 140%; }
+    }
+
+    /* Status feed */
+    .status-feed {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--rule);
+      font-size: 17px;
+      font-weight: 500;
+      color: var(--mid);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      animation: fadeIn 0.2s ease both;
+    }
+
+    .status-item:last-child { border-bottom: none; }
+
+    .status-item.active { color: var(--black); }
+    .status-item.done   { color: var(--mid); }
+
+    .s-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 2px solid var(--rule);
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+    .status-item.active .s-dot {
+      border-color: var(--accent);
+      background: var(--accent);
+      animation: blink 1.1s ease-in-out infinite;
+    }
+    .status-item.done .s-dot {
+      border-color: var(--black);
+      background: var(--black);
+      animation: none;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    /* ══════════════════════════════════════
+       RESULT
+    ══════════════════════════════════════ */
+
+    /* Editorial hero */
+    .result-hero {
+      border-top: 3px solid var(--black);
+      border-bottom: 1px solid var(--rule);
+      padding: clamp(28px, 5vw, 56px) 0;
+      margin-bottom: clamp(32px, 5vw, 56px);
+    }
+
+    .result-kicker {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 14px;
+    }
+
+    .result-title {
+      font-family: var(--font-display);
+      font-size: clamp(80px, 15vw, 176px);
+      line-height: 0.9;
+      letter-spacing: 2px;
+      color: var(--black);
+      text-transform: uppercase;
+      margin-bottom: 24px;
+      word-break: break-word;
+    }
+
+    .result-meta {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .result-pill {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--white);
+      background: var(--black);
+      padding: 6px 16px;
+    }
+
+    .result-pill.accent { background: var(--accent); }
+
+    /* Report */
+    .report { display: flex; flex-direction: column; gap: 0; }
+
+    .rep-section {
+      border-top: 1px solid var(--rule);
+      padding: clamp(28px, 4vw, 48px) 0;
+    }
+
+    .rep-header {
+      display: flex;
+      align-items: baseline;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    .rep-num {
+      font-family: var(--font-display);
+      font-size: clamp(56px, 7vw, 84px);
+      color: var(--rule);
+      line-height: 1;
+      flex-shrink: 0;
+      letter-spacing: 1px;
+    }
+
+    .rep-title-wrap { display: flex; flex-direction: column; gap: 2px; }
+
+    .rep-title {
+      font-family: var(--font-display);
+      font-size: clamp(32px, 4.5vw, 54px);
+      line-height: 1;
+      color: var(--black);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .rep-title-sub {
+      font-family: var(--font-serif);
+      font-size: clamp(16px, 2.2vw, 21px);
+      font-style: italic;
+      color: var(--mid);
+    }
+
+    .rep-body {
+      font-size: var(--body-size);
+      line-height: var(--body-lh);
+      color: var(--black);
+      max-width: 720px;
+    }
+
+    .rep-body p { margin-bottom: 18px; }
+    .rep-body p:last-child { margin-bottom: 0; }
+
+    .rep-body strong { font-weight: 700; }
+
+    .rep-body a {
+      color: var(--black);
+      font-weight: 600;
+      text-decoration: underline;
+      text-decoration-color: var(--accent);
+      text-underline-offset: 4px;
+      text-decoration-thickness: 2px;
+      transition: text-decoration-color 0.15s;
+    }
+    .rep-body a:hover { text-decoration-color: var(--black); }
+
+    /* Bullet items */
+    .bullet-list { display: flex; flex-direction: column; margin-top: 4px; }
+
+    .bullet-item {
+      display: flex;
+      gap: 16px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--rule);
+    }
+    .bullet-item:last-child { border-bottom: none; }
+    .bullet-item:first-child { padding-top: 0; }
+
+    .bullet-dot {
+      font-family: var(--font-display);
+      font-size: 20px;
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-top: 2px;
+      line-height: var(--body-lh);
+    }
+
+    .bullet-text { flex: 1; }
+
+    /* Raw fallback */
+    .report-raw {
+      padding: 32px 0;
+      font-size: var(--body-size);
+      line-height: var(--body-lh);
+      white-space: pre-wrap;
+      border-top: 1px solid var(--rule);
+    }
+
+    .report-raw strong { font-weight: 700; }
+    .report-raw a {
+      color: var(--black);
+      font-weight: 600;
+      text-decoration: underline;
+      text-decoration-color: var(--accent);
+      text-underline-offset: 3px;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding-top: 40px;
+      border-top: 1px solid var(--rule);
+      margin-top: 8px;
+    }
+
+    /* Feedback widget */
+    .feedback-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 20px 0 0;
+    }
+
+    .fb-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--mid);
+    }
+
+    .fb-btn {
+      width: 44px;
+      height: 44px;
+      border: 1.5px solid var(--rule);
+      background: var(--white);
+      cursor: pointer;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s;
+    }
+    .fb-btn:hover:not(:disabled) { border-color: var(--black); }
+    .fb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .fb-btn.selected { background: var(--black); border-color: var(--black); }
+    .fb-btn.fb-up.selected { background: var(--teal); border-color: var(--teal); }
+    .fb-btn.fb-down.selected { background: var(--accent2); border-color: var(--accent2); }
+
+    .fb-status {
+      font-size: 13px;
+      color: var(--teal);
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    /* ══════════════════════════════════════
+       SIDEBAR
+    ══════════════════════════════════════ */
+    .sidebar-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: var(--mid);
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1.5px solid var(--black);
+    }
+
+    .hist-empty {
+      font-size: 15px;
+      color: var(--mid);
+      font-weight: 300;
+      line-height: 1.6;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .hist-items { display: flex; flex-direction: column; }
+
+    .hist-item {
+      padding: 16px 0;
+      cursor: pointer;
+      border-bottom: 1px solid var(--rule);
+      transition: padding-left 0.15s;
+    }
+
+    .hist-item:hover { padding-left: 8px; }
+    .hist-item:hover .hist-route { color: var(--accent); }
+
+    .hist-route {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--black);
+      margin-bottom: 3px;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: color 0.15s;
+    }
+
+    .hist-meta {
+      font-size: 11px;
+      color: var(--mid);
+      font-weight: 300;
+    }
+
+    .hist-clear {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--mid);
+      cursor: pointer;
+      padding: 14px 0 0;
+      transition: color 0.15s;
+    }
+    .hist-clear:hover { color: var(--accent2); }
+
+    /* ══════════════════════════════════════
+       RESPONSIVE
+    ══════════════════════════════════════ */
+    @media (max-width: 780px) {
+      .page { grid-template-columns: 1fr; gap: 48px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .chips { grid-template-columns: repeat(2, 1fr); }
+      aside { border-top: 3px solid var(--black); padding-top: 32px; }
+      .logo-rule, .logo-sub { display: none; }
+    }
+
+    @media (max-width: 480px) {
+      .chips { grid-template-columns: 1fr 1fr; }
+      .result-meta { gap: 10px; }
+    }
+
+    @media print {
+      header, aside, .action-row { display: none !important; }
+      .page { grid-template-columns: 1fr; max-width: 100%; padding: 0; }
+      .screen { display: block !important; }
+      #screen-form, #screen-loading { display: none !important; }
+      body { background: white; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="logo-name">TravelShaper</span>
+    <div class="logo-rule"></div>
+    <span class="logo-sub">AI Travel Planning</span>
+  </div>
+  <span class="header-ver">V0.2.5</span>
+</header>
+
+<div class="page">
+  <div class="main-col">
+
+    <!-- ════════════ FORM ════════════ -->
+    <div id="screen-form" class="screen active">
+
+      <div class="form-hero">
+        <div class="form-kicker">Trip Planner</div>
+        <div class="form-headline">
+          Where are<br>you going?
+          <em>The world is waiting.</em>
+        </div>
+        <div class="form-desc">
+          Tell us your details and TravelShaper searches live flights, hotels, and insider intelligence —
+          then writes you a personalised briefing full of links and seriously good vibes.
+        </div>
+      </div>
+
+      <div class="error-box" id="err"></div>
+      <div class="correction-banner" id="correction-banner"></div>
+
+      <form id="trip-form" novalidate>
+        <div class="form-grid">
+
+          <div class="fg">
+            <label>Departing from <span class="req">*</span></label>
+            <input type="text" id="departure" placeholder="San Francisco, CA" required />
+            <span class="field-note">City or region — we'll find the nearest airport</span>
+          </div>
+
+          <div class="fg">
+            <label>Destination <span class="req">*</span></label>
+            <input type="text" id="destination" placeholder="Tokyo, Japan" required />
+          </div>
+
+          <div class="fg">
+            <label>Departure date <span class="req">*</span></label>
+            <input type="date" id="dep-date" required />
+          </div>
+
+          <div class="fg">
+            <label>Duration</label>
+            <select id="duration">
+              <option value="1">1 week</option>
+              <option value="2" selected>2 weeks</option>
+              <option value="3">3 weeks</option>
+              <option value="4">4 weeks</option>
+            </select>
+          </div>
+
+          <div class="fg full">
+            <label>Budget</label>
+            <div class="budget-row">
+              <div class="bopt">
+                <input type="radio" name="budget" id="b-save" value="save money" checked />
+                <label for="b-save">💰 Save money</label>
+              </div>
+              <div class="bopt">
+                <input type="radio" name="budget" id="b-full" value="full experience" />
+                <label for="b-full">✨ Full experience</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="fg full">
+            <label>Interests</label>
+            <div class="chips">
+              <div class="chip"><input type="checkbox" id="i-food" value="food and dining" checked /><label for="i-food">🍜 Food</label></div>
+              <div class="chip"><input type="checkbox" id="i-arts" value="arts and culture" /><label for="i-arts">🎨 Arts</label></div>
+              <div class="chip"><input type="checkbox" id="i-photo" value="photography" /><label for="i-photo">📸 Photo</label></div>
+              <div class="chip"><input type="checkbox" id="i-nature" value="nature and outdoors" /><label for="i-nature">🌿 Nature</label></div>
+              <div class="chip"><input type="checkbox" id="i-fit" value="fitness and sports" /><label for="i-fit">🏃 Fitness</label></div>
+              <div class="chip"><input type="checkbox" id="i-night" value="nightlife and events" /><label for="i-night">🎶 Nightlife</label></div>
+            </div>
+          </div>
+
+          <div class="form-divider"></div>
+
+          <div class="fg full">
+            <label>Additional preferences <span class="opt">— optional · 500 chars</span></label>
+            <div class="char-wrap">
+              <textarea
+                id="preferences"
+                maxlength="500"
+                rows="3"
+                placeholder="e.g. Vegetarian. Travelling with a 5-year-old. Prefer quieter areas away from tourist crowds."
+                oninput="updateCount()"
+              ></textarea>
+              <span class="char-count" id="char-count">0 / 500</span>
+            </div>
+            <span class="field-note">Refines web search queries. Safety-checked before use.</span>
+          </div>
+
+        </div>
+
+        <button type="submit" class="btn-primary" id="submit-btn">
+          Plan my trip →
+        </button>
+      </form>
+    </div>
+
+    <!-- ════════════ LOADING ════════════ -->
+    <div id="screen-loading" class="screen">
+      <div class="loading-hero">
+        <div class="loading-headline">On it.</div>
+        <div class="loading-sub">Searching live data — usually 15–30 seconds</div>
+      </div>
+      <div class="spinner-bar"></div>
+      <div class="status-feed" id="status-feed"></div>
+    </div>
+
+    <!-- ════════════ RESULT ════════════ -->
+    <div id="screen-result" class="screen">
+      <div class="result-hero">
+        <div class="result-kicker">Your travel briefing</div>
+        <div class="result-title" id="res-title">Tokyo</div>
+        <div class="result-meta">
+          <span class="result-pill" id="res-dates"></span>
+          <span class="result-pill accent" id="res-budget"></span>
+        </div>
+      </div>
+
+      <div id="report-out"></div>
+
+      <div class="feedback-row">
+        <span class="fb-label">Was this helpful?</span>
+        <button class="fb-btn fb-up" onclick="sendFeedback(1)" title="Thumbs up">👍</button>
+        <button class="fb-btn fb-down" onclick="sendFeedback(-1)" title="Thumbs down">👎</button>
+        <span class="fb-status" id="fb-status"></span>
+      </div>
+      <div class="action-row">
+        <button class="btn-primary" onclick="startOver()">← New trip</button>
+        <button class="btn-ghost" onclick="window.print()">🖨 Save PDF</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════ SIDEBAR ════════════ -->
+  <aside>
+    <div class="sidebar-label">Recent trips</div>
+    <div id="hist"></div>
+  </aside>
+</div>
+
+<script>
+  const SESSION_ID = crypto.randomUUID();
+  const HKEY = 'travelshaper_v5_history';
+
+  const SECTIONS = [
+    { match: ['getting there','flight','chariot','✈'],       icon: '01', title: 'GETTING THERE',    sub: 'Your chariot awaits' },
+    { match: ['where to stay','hotel','sanctuary','home away'], icon: '02', title: 'WHERE TO STAY',  sub: 'Your home away from home' },
+    { match: ['before you go','insider','cultural','etiquette','language'], icon: '03', title: 'BEFORE YOU GO', sub: 'The insider brief' },
+    { match: ['what to do','real itinerary','activities','recommend'], icon: '04', title: 'WHAT TO DO',   sub: 'The real itinerary' },
+  ];
+
+  (() => {
+    const today = new Date().toISOString().slice(0,10);
+    const d = document.getElementById('dep-date');
+    d.min = today; d.value = today;
+    document.getElementById('trip-form').addEventListener('submit', onSubmit);
+    renderHist();
+  })();
+
+  function updateCount() {
+    const el = document.getElementById('preferences');
+    const cc = document.getElementById('char-count');
+    if (!el || !cc) return;
+    const n = el.value.length;
+    cc.textContent = `${n} / 500`;
+    cc.style.color = n >= 500 ? '#E63535' : n > 450 ? '#FF7A00' : 'var(--mid)';
+  }
+
+  function show(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + id).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function startOver() { show('form'); }
+
+  // ── Status feed ──────────────────────────────────────────────────────────
+  function addStatus(msg, state = 'active') {
+    const feed = document.getElementById('status-feed');
+    const prev = feed.querySelector('.status-item.active');
+    if (prev) prev.classList.replace('active', 'done');
+    const el = document.createElement('div');
+    el.className = `status-item ${state}`;
+    el.innerHTML = `<span class="s-dot"></span><span>${msg}</span>`;
+    feed.appendChild(el);
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────────
+  async function onSubmit(e) {
+    e.preventDefault();
+
+    const dep   = document.getElementById('departure').value.trim();
+    const dest  = document.getElementById('destination').value.trim();
+    const date  = document.getElementById('dep-date').value;
+    const wks   = +document.getElementById('duration').value;
+    const bdg   = document.querySelector('input[name="budget"]:checked').value;
+    const ints  = [...document.querySelectorAll('.chip input:checked')].map(i => i.value);
+    const prefs = document.getElementById('preferences').value.trim();
+
+    const errEl = document.getElementById('err');
+    const corrEl = document.getElementById('correction-banner');
+    errEl.style.display = 'none';
+    corrEl.style.display = 'none';
+
+    if (!dep || !dest || !date) {
+      errEl.textContent = 'Please fill in departure city, destination, and departure date.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const depDate = new Date(date + 'T12:00:00');
+    const retDate = new Date(depDate);
+    retDate.setDate(retDate.getDate() + wks * 7);
+    const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const depStr = fmt(depDate), retStr = fmt(retDate);
+
+    const intLine = ints.length
+      ? `Interests: ${ints.join(', ')}.`
+      : 'No specific interests — general recommendations welcome.';
+
+    const msg = [
+      `I am planning a trip departing from ${dep} (please identify the nearest major international airport).`,
+      `Destination: ${dest}.`,
+      `Departure: ${date}. Return: ${retDate.toISOString().slice(0,10)} (${wks} week${wks>1?'s':''}).`,
+      `Budget preference: ${bdg}.`,
+      intLine,
+      `Please provide a complete travel briefing with hyperlinks for every named place, restaurant, hotel, and attraction.`,
+    ].join(' ');
+
+    document.getElementById('res-title').textContent = dest;
+    document.getElementById('res-dates').textContent = `${depStr} → ${retStr}`;
+    document.getElementById('res-budget').textContent = bdg;
+
+    document.getElementById('status-feed').innerHTML = '';
+    document.getElementById('submit-btn').disabled = true;
+    show('loading');
+
+    const body = { message: msg, departure: dep, destination: dest, session_id: SESSION_ID };
+    if (prefs) body.preferences = prefs;
+
+    try {
+      const r = await fetch('/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!r.ok) throw new Error(`Server error ${r.status}`);
+
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '', finalResponse = null, event = null, data = null;
+      const corrections = {};
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) { event = line.slice(7).trim(); }
+          else if (line.startsWith('data: ')) { try { data = JSON.parse(line.slice(6)); } catch(_){} }
+          else if (line === '' && event && data) {
+
+            if (event === 'status') {
+              addStatus(data.message);
+
+            } else if (event === 'place_corrected') {
+              corrections[data.field] = { original: data.original, canonical: data.canonical };
+              // Update result title if destination was corrected
+              if (data.field === 'destination') {
+                document.getElementById('res-title').textContent = data.canonical;
+              }
+
+            } else if (event === 'place_error') {
+              show('form');
+              // Highlight the offending field
+              const fieldEl = document.getElementById(data.field === 'departure' ? 'departure' : 'destination');
+              if (fieldEl) { fieldEl.style.borderColor = '#E63535'; fieldEl.focus(); }
+              errEl.textContent = data.message;
+              errEl.style.display = 'block';
+              document.getElementById('submit-btn').disabled = false;
+              return;
+
+            } else if (event === 'validation_error') {
+              show('form');
+              errEl.textContent = data.message;
+              errEl.style.display = 'block';
+              document.getElementById('submit-btn').disabled = false;
+              return;
+
+            } else if (event === 'done') {
+              finalResponse = data.response;
+              window._lastRunId = data.run_id || null;
+              addStatus('🎉 Your briefing is ready', 'done');
+
+            } else if (event === 'error') {
+              throw new Error(data.message);
+            }
+
+            event = null; data = null;
+          }
+        }
+      }
+
+      if (!finalResponse) throw new Error('No response received.');
+
+      await new Promise(r => setTimeout(r, 500));
+
+      renderReport(finalResponse);
+
+      // Show correction notice if any names were auto-corrected
+      if (Object.keys(corrections).length) {
+        const notes = Object.entries(corrections)
+          .map(([f, c]) => `${f === 'departure' ? 'Departure' : 'Destination'} interpreted as: <strong>${c.canonical}</strong>`)
+          .join(' &nbsp;·&nbsp; ');
+        corrEl.innerHTML = `📍 ${notes}`;
+        corrEl.style.display = 'block';
+      }
+
+      saveHist({ title: dest, departure: dep, dates: `${depStr} → ${retStr}`,
+                  budget: bdg, response: finalResponse, ts: Date.now() });
+      show('result');
+
+    } catch(err) {
+      show('form');
+      errEl.textContent = `Something went wrong: ${err.message}. Please try again.`;
+      errEl.style.display = 'block';
+    }
+
+    document.getElementById('submit-btn').disabled = false;
+  }
+
+  // ── Report rendering ──────────────────────────────────────────────────────
+  function renderReport(text) {
+    const out = document.getElementById('report-out');
+    out.innerHTML = '';
+
+    // Reset feedback widget
+    document.querySelectorAll('.fb-btn').forEach(b => {
+      b.disabled = false;
+      b.classList.remove('selected');
+    });
+    const fbStatus = document.getElementById('fb-status');
+    if (fbStatus) fbStatus.textContent = '';
+
+    const lines = text.split('\n');
+    const parsed = [];
+    let cur = null;
+    let secIndex = 0;
+
+    // Track which section titles have already been created so we
+    // merge duplicate matches (e.g. the agent repeating "Where to Stay"
+    // before each hotel entry) into the existing section rather than
+    // spawning a new card for each one.
+    const seenTitles = new Set();
+
+    for (const line of lines) {
+      const isH = /^#{1,4} /.test(line) || /^\*\*[^*]+\*\*\s*$/.test(line.trim());
+      if (isH) {
+        const stripped = line.replace(/^#+\s*/, '').replace(/\*\*/g,'').trim();
+        const lower = stripped.toLowerCase();
+        const def = SECTIONS.find(s => s.match.some(k => lower.includes(k)));
+        if (def) {
+          if (seenTitles.has(def.title)) {
+            // Duplicate section header — route lines into the existing section
+            // and add a blank separator line so the content reads naturally
+            const existing = parsed.find(s => s.title === def.title);
+            if (existing) {
+              cur = existing;
+              cur.lines.push(''); // visual separator between entries
+            }
+          } else {
+            cur = { ...def, num: String(++secIndex).padStart(2,'0'), lines: [] };
+            parsed.push(cur);
+            seenTitles.add(def.title);
+          }
+          continue;
+        }
+      }
+      if (cur) cur.lines.push(line);
+      else {
+        if (!parsed.length) { cur = { icon: '00', title: 'OVERVIEW', sub: '', num:'00', lines:[] }; parsed.push(cur); seenTitles.add('OVERVIEW'); }
+        parsed[parsed.length-1].lines.push(line);
+      }
+    }
+
+    const meaningful = parsed.filter(s => s.lines.join('').trim().length > 20);
+
+    if (!meaningful.length || (meaningful.length === 1 && meaningful[0].title === 'OVERVIEW')) {
+      const raw = document.createElement('div');
+      raw.className = 'report-raw';
+      raw.innerHTML = renderInline(text);
+      out.appendChild(raw);
+      return;
+    }
+
+    const report = document.createElement('div');
+    report.className = 'report';
+
+    meaningful.forEach((sec, i) => {
+      const body = sec.lines.join('\n').trim();
+      if (!body) return;
+      const el = document.createElement('div');
+      el.className = 'rep-section';
+      el.innerHTML = `
+        <div class="rep-header">
+          <div class="rep-num">${String(i+1).padStart(2,'0')}</div>
+          <div class="rep-title-wrap">
+            <div class="rep-title">${sec.title}</div>
+            ${sec.sub ? `<div class="rep-title-sub">${sec.sub}</div>` : ''}
+          </div>
+        </div>
+        <div class="rep-body">${renderBody(body)}</div>
+      `;
+      report.appendChild(el);
+    });
+
+    out.appendChild(report);
+  }
+
+  function renderBody(text) {
+    const lines = text.split('\n');
+    let html = '', inList = false;
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) { if (inList) { html += '</div>'; inList = false; } continue; }
+      if (/^#{1,4} /.test(t)) continue;
+      if (/^\*\*[^*]+\*\*\s*$/.test(t) && t.length < 80) {
+        if (inList) { html += '</div>'; inList = false; }
+        html += `<p><strong>${renderInline(t.replace(/\*\*/g,''))}</strong></p>`;
+        continue;
+      }
+      if (/^[-*•]\s/.test(t) || /^\d+\.\s/.test(t)) {
+        const c = t.replace(/^[-*•]\s+/,'').replace(/^\d+\.\s+/,'');
+        if (!inList) { html += '<div class="bullet-list">'; inList = true; }
+        html += `<div class="bullet-item"><span class="bullet-dot">—</span><span class="bullet-text">${renderInline(c)}</span></div>`;
+        continue;
+      }
+      if (inList) { html += '</div>'; inList = false; }
+      html += `<p>${renderInline(t)}</p>`;
+    }
+    if (inList) html += '</div>';
+    return html;
+  }
+
+  function renderInline(t) {
+    return t
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g,'<em>$1</em>');
+  }
+
+  // ── History ───────────────────────────────────────────────────────────────
+  function getHist() { try { return JSON.parse(localStorage.getItem(HKEY)||'[]'); } catch { return []; } }
+
+  function saveHist(entry) {
+    let h = getHist().filter(x => !(x.title===entry.title && x.dates===entry.dates));
+    h.unshift(entry);
+    if (h.length > 10) h = h.slice(0,10);
+    localStorage.setItem(HKEY, JSON.stringify(h));
+    renderHist();
+  }
+
+  function clearHist() { localStorage.removeItem(HKEY); renderHist(); }
+
+  function renderHist() {
+    const el = document.getElementById('hist');
+    const h = getHist();
+    if (!h.length) {
+      el.innerHTML = '<div class="hist-empty">Your last 10 trips will appear here.</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div class="hist-items">
+        ${h.map((x,i) => `
+          <div class="hist-item" onclick="viewHist(${i})">
+            <div class="hist-route">${x.departure||'?'} → ${x.title}</div>
+            <div class="hist-meta">${x.dates} · ${x.budget}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="hist-clear" onclick="clearHist()">Clear history</div>
+    `;
+  }
+
+  function viewHist(i) {
+    const h = getHist(); const x = h[i]; if (!x) return;
+    document.getElementById('res-title').textContent = x.title;
+    document.getElementById('res-dates').textContent = x.dates;
+    document.getElementById('res-budget').textContent = x.budget;
+    renderReport(x.response);
+    show('result');
+  }
+
+  // ── Feedback ──────────────────────────────────────────────────────────
+  async function sendFeedback(score) {
+    const runId = window._lastRunId;
+    if (!runId) {
+      console.warn('No run_id available for feedback');
+      return;
+    }
+
+    // Disable buttons immediately to prevent duplicates
+    document.querySelectorAll('.fb-btn').forEach(b => { b.disabled = true; });
+
+    // Highlight the selected button
+    const cls = score >= 1 ? 'fb-up' : 'fb-down';
+    document.querySelector(`.${cls}`).classList.add('selected');
+
+    const statusEl = document.getElementById('fb-status');
+    statusEl.textContent = 'Sending...';
+
+    try {
+      const r = await fetch('/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          run_id: runId,
+          session_id: SESSION_ID,
+          score: score,
+        }),
+      });
+
+      if (r.ok) {
+        const data = await r.json();
+        statusEl.textContent = data.synced_to_phoenix
+          ? '✓ Thanks! Logged to Phoenix.'
+          : '✓ Thanks! Saved for review.';
+      } else {
+        statusEl.textContent = 'Could not save — try again.';
+        document.querySelectorAll('.fb-btn').forEach(b => { b.disabled = false; });
+        document.querySelector(`.${cls}`).classList.remove('selected');
+      }
+    } catch (err) {
+      statusEl.textContent = 'Network error — try again.';
+      document.querySelectorAll('.fb-btn').forEach(b => { b.disabled = false; });
+      document.querySelector(`.${cls}`).classList.remove('selected');
+    }
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+services:
+  travelshaper:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
+      - ARIZE_SPACE_ID=${ARIZE_SPACE_ID:-}
+      - ARIZE_API_KEY=${ARIZE_API_KEY:-}
+      - ARIZE_PROJECT_NAME=${ARIZE_PROJECT_NAME:-travelshaper}
+      - ARIZE_ENDPOINT=${ARIZE_ENDPOINT:-}
+      # Custom OTLP (resolved from .env when OTEL_DESTINATION=custom)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_AUTH_TOKEN=${OTEL_AUTH_TOKEN:-}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-travelshaper}
+      # Debug
+      - TRAVELSHAPER_DEBUG=${TRAVELSHAPER_DEBUG:-false}
+      - PHOENIX_UI_URL=${PHOENIX_UI_URL:-http://localhost:6006}
+    depends_on:
+      phoenix:
+        condition: service_started
+    restart: unless-stopped
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"
+    restart: unless-stopped

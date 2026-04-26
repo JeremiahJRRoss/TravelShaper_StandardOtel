@@ -122,3 +122,30 @@ def test_init_tracing_grpc_protocol() -> None:
     fake_traceloop_cls.init.assert_called_once()
     init_kwargs = fake_traceloop_cls.init.call_args.kwargs
     assert init_kwargs.get("exporter") is fake_exporter_instance
+
+
+def test_init_tracing_passes_resource_attributes() -> None:
+    """OTEL_RESOURCE_ATTRIBUTES values should flow into Traceloop.init via
+    resource_attributes, alongside an auto-derived service.instance.id."""
+    from agent import _init_tracing
+
+    fake_module = MagicMock()
+    fake_traceloop_cls = MagicMock()
+    fake_module.Traceloop = fake_traceloop_cls
+
+    env = {
+        "OTEL_RESOURCE_ATTRIBUTES":
+            "service.version=1.2.3,deployment.environment=staging,service.namespace=ts",
+    }
+    with patch.dict(sys.modules, {"traceloop.sdk": fake_module}), \
+         patch.dict(os.environ, env, clear=False):
+        os.environ.pop("OTEL_EXPORTER_OTLP_PROTOCOL", None)
+        _init_tracing()
+
+    fake_traceloop_cls.init.assert_called_once()
+    attrs = fake_traceloop_cls.init.call_args.kwargs.get("resource_attributes", {})
+    assert attrs.get("service.version") == "1.2.3"
+    assert attrs.get("deployment.environment") == "staging"
+    assert attrs.get("service.namespace") == "ts"
+    # service.instance.id is auto-populated from the hostname
+    assert attrs.get("service.instance.id")

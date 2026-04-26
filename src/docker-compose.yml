@@ -21,6 +21,9 @@ services:
       # Debug
       TRAVELSHAPER_DEBUG: ${TRAVELSHAPER_DEBUG:-false}
     volumes:
-      # Observe Agent on the host tails ./logs/travelshaper.log
-      - ./logs:/app/logs
+      # Observe Agent on the host tails ./logs/travelshaper.log.
+      # The :z label tells SELinux this bind mount is shared, which is
+      # required on RHEL/Fedora rootless Podman; on Docker (Mac/Windows
+      # /non-SELinux Linux) the suffix is a harmless no-op.
+      - ./logs:/app/logs:z
     restart: unless-stopped

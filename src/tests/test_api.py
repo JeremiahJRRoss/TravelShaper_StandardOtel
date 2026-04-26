@@ -186,7 +186,7 @@ def test_chat_includes_debug_when_enabled(mock_agent) -> None:
     assert "debug" in body
     assert "trace_url" in body["debug"]
     assert "run_id" in body["debug"]
-    assert body["debug"]["trace_url"].startswith("http")
+    assert body["debug"]["trace_url"].startswith("trace:")
 
 
 @patch("api._DEBUG", False)
@@ -302,19 +302,19 @@ def test_chat_records_guardrail_metadata(mock_agent, mock_validate_place) -> Non
 
 def test_feedback_accepts_valid_payload() -> None:
     """POST /feedback with valid score returns 200 with status and sync flag."""
-    with patch("api._sync_feedback_to_phoenix", return_value=False):
-        r = client.post("/feedback", json={
-            "run_id": "test-run-123",
-            "session_id": "test-session-456",
-            "score": 1,
-            "comment": "Great briefing!",
-        })
+    r = client.post("/feedback", json={
+        "run_id": "test-run-123",
+        "session_id": "test-session-456",
+        "score": 1,
+        "comment": "Great briefing!",
+    })
 
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "received"
     assert "synced_to_phoenix" in body
-    assert isinstance(body["synced_to_phoenix"], bool)
+    # Phoenix sync is permanently disabled in the Observe migration
+    assert body["synced_to_phoenix"] is False
 
 
 def test_feedback_rejects_invalid_score() -> None:
@@ -415,32 +415,9 @@ def test_build_timing_detects_sla_breach() -> None:
 # ── Trace URL routing ─────────────────────────────────────────────────
 
 
-@patch("api.TRACE_DESTINATION", "phoenix")
-def test_trace_url_phoenix() -> None:
-    """_trace_url returns a Phoenix URL when destination is phoenix."""
+def test_trace_url_returns_trace_prefix() -> None:
+    """_trace_url returns trace:{run_id} (Observe has no per-run deep link)."""
     from api import _trace_url
 
-    url = _trace_url("run-123")
-    assert "phoenix" in url.lower() or "localhost" in url
-    assert "run-123" in url
-
-
-@patch("api.TRACE_DESTINATION", "arize")
-@patch("api._ARIZE_SPACE_ID", "space-abc")
-def test_trace_url_arize() -> None:
-    """_trace_url returns an Arize URL when destination is arize."""
-    from api import _trace_url
-
-    url = _trace_url("run-456")
-    assert "app.arize.com" in url
-    assert "space-abc" in url
-    assert "run-456" in url
-
-
-@patch("api.TRACE_DESTINATION", "custom")
-def test_trace_url_custom() -> None:
-    """_trace_url returns trace:{run_id} for custom backend."""
-    from api import _trace_url
-
-    url = _trace_url("run-789")
-    assert url == "trace:run-789"
+    assert _trace_url("abc") == "trace:abc"
+    assert _trace_url("run-789") == "trace:run-789"

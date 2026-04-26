@@ -13,8 +13,8 @@ load_dotenv()
 
 import datetime
 import json
+import logging
 import os
-import sys
 import threading
 import time
 from collections import defaultdict
@@ -32,26 +32,49 @@ from langchain_openai import ChatOpenAI as _ValidatorLLM
 from pydantic import BaseModel, Field
 
 from agent import build_agent, get_prompt_version, TRACE_DESTINATION
+from logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Debug configuration
 # ---------------------------------------------------------------------------
 _DEBUG = os.getenv("TRAVELSHAPER_DEBUG", "false").lower() in ("true", "1", "yes")
-_PHOENIX_UI_URL = os.getenv("PHOENIX_UI_URL", "http://localhost:6006").rstrip("/")
-_ARIZE_SPACE_ID = os.getenv("ARIZE_SPACE_ID", "")
 
 
 def _trace_url(run_id: str) -> str:
-    """Construct a trace viewer URL for the configured backend."""
-    if TRACE_DESTINATION == "arize" and _ARIZE_SPACE_ID:
-        project = os.getenv("ARIZE_PROJECT_NAME", "travelshaper")
-        return (
-            f"https://app.arize.com/organizations/{_ARIZE_SPACE_ID}"
-            f"/spaces/default/projects/{project}/traces/{run_id}"
-        )
-    elif TRACE_DESTINATION == "custom":
-        return f"trace:{run_id}"
-    return f"{_PHOENIX_UI_URL}/projects/travelshaper/traces/{run_id}"
+    """Return an opaque trace identifier.
+
+    Traces land in Observe via the Observe Agent; there is no per-run deep
+    link to construct here. The token is included in debug responses so it
+    can be searched in the Observe UI.
+    """
+    return f"trace:{run_id}"
+
+
+def _set_association_properties(
+    session_id: str,
+    run_id: str,
+    destination: str,
+    budget_mode: str,
+    prompt_version: str,
+) -> None:
+    """Attach session/run context to all spans for Observe LLM Explorer.
+
+    Best-effort — silently no-ops if the Traceloop SDK isn't installed.
+    """
+    try:
+        from traceloop.sdk import Traceloop
+        Traceloop.set_association_properties({
+            "user_id": session_id,
+            "chat_id": run_id,
+            "destination": destination,
+            "budget_mode": budget_mode,
+            "prompt_version": prompt_version,
+        })
+    except ImportError:
+        pass
 
 
 def _guardrail_metadata(name: str, field: str) -> dict:
@@ -179,7 +202,7 @@ agent = build_agent()
 app = FastAPI(
     title="TravelShaper API",
     description="AI travel planning assistant — LangGraph agent with flight, hotel, and cultural guide tools.",
-    version="0.2.5",
+    version="0.3.0",
 )
 
 _validator_llm = _ValidatorLLM(
@@ -298,7 +321,7 @@ class ChatRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="Stable client session ID for trace grouping in Phoenix.",
+        description="Stable client session ID for trace grouping in Observe.",
     )
 
 
@@ -377,7 +400,7 @@ def validate_preferences(
         data = _llm_json(PREFERENCES_VALIDATION_PROMPT, text, max_tokens=80, config=config)
         return ValidationResult(valid=bool(data["valid"]), reason=str(data.get("reason", "")))
     except Exception as exc:
-        print(f"[validate_preferences] error: {exc}", file=sys.stderr)
+        logger.warning("validate_preferences error: %s", exc)
         return ValidationResult(valid=False, reason="Safety check temporarily unavailable — please try again.")
 
 
@@ -404,7 +427,7 @@ def validate_place(
             field=field,
         )
     except Exception as exc:
-        print(f"[validate_place:{field}] error: {exc}", file=sys.stderr)
+        logger.warning("validate_place[%s] error: %s", field, exc)
         # Fail open on transient errors — don't block the user
         return PlaceValidationResult(valid=True, canonical=name, reason="", field=field)
 
@@ -470,55 +493,7 @@ def _store_feedback(feedback: FeedbackRequest) -> None:
         with open(_FEEDBACK_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception as exc:
-        print(f"[feedback] failed to write: {exc}", file=sys.stderr)
-
-
-def _sync_feedback_to_phoenix(run_id: str, score: int, comment: str | None) -> bool:
-    """Best-effort: log a User Feedback annotation on the Phoenix span.
-
-    Returns True if annotation was logged, False otherwise. Never raises.
-    """
-    try:
-        import phoenix as px
-        from phoenix.trace import SpanEvaluations
-        import pandas as pd
-
-        client = px.Client()
-        spans_df = client.get_spans_dataframe()
-        if spans_df is None or spans_df.empty:
-            return False
-
-        # Find the root span for this run_id
-        match = spans_df[
-            spans_df.index.astype(str) == run_id
-        ] if run_id in spans_df.index.astype(str).values else pd.DataFrame()
-
-        # Fallback: search metadata for the run_id
-        if match.empty and "context.span_id" in spans_df.columns:
-            match = spans_df[spans_df["context.span_id"].astype(str) == run_id]
-
-        if match.empty:
-            return False
-
-        eval_df = pd.DataFrame(
-            {
-                "label": ["positive" if score >= 1 else "negative"],
-                "score": [float(score)],
-                "explanation": [comment or ""],
-            },
-            index=match.index[:1],
-        )
-
-        client.log_evaluations(
-            SpanEvaluations(eval_name="User Feedback", dataframe=eval_df)
-        )
-        return True
-
-    except ImportError:
-        return False  # Phoenix not installed
-    except Exception as exc:
-        print(f"[feedback] Phoenix sync failed (non-fatal): {exc}", file=sys.stderr)
-        return False
+        logger.warning("feedback write failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -601,9 +576,21 @@ def chat(request: ChatRequest) -> dict:
     run_id = str(uuid4())
     session_id = request.session_id or run_id
     prompt_version = get_prompt_version(request.message)
+    budget_mode = (
+        "save_money" if prompt_version.startswith("save_money")
+        else "full_experience"
+    )
 
     tracker = TokenUsageTracker()
     t_request_start = time.monotonic()
+
+    _set_association_properties(
+        session_id=session_id,
+        run_id=run_id,
+        destination=request.destination or "",
+        budget_mode=budget_mode,
+        prompt_version=prompt_version,
+    )
 
     config: RunnableConfig = {
         "metadata": {
@@ -611,10 +598,7 @@ def chat(request: ChatRequest) -> dict:
             "travelshaper.destination": request.destination or "",
             "travelshaper.departure": request.departure or "",
             "travelshaper.prompt_version": prompt_version,
-            "travelshaper.budget_mode": (
-                "save_money" if prompt_version.startswith("save_money")
-                else "full_experience"
-            ),
+            "travelshaper.budget_mode": budget_mode,
             "travelshaper.has_preferences": bool(
                 request.preferences and request.preferences.strip()
             ),
@@ -694,7 +678,7 @@ def chat(request: ChatRequest) -> dict:
 
     t_agent_end = time.monotonic()
 
-    # Record usage and timing as span metadata (visible in Phoenix)
+    # Record usage and timing as span metadata (visible in Observe)
     config["metadata"]["travelshaper.total_tokens"] = tracker.total_tokens
     config["metadata"]["travelshaper.estimated_cost_usd"] = tracker.estimated_cost_usd()
     config["metadata"]["travelshaper.sla.budget_ms"] = _SLA_TOTAL_S * 1000
@@ -730,9 +714,21 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     run_id = str(uuid4())
     session_id = request.session_id or run_id
     prompt_version = get_prompt_version(request.message)
+    budget_mode = (
+        "save_money" if prompt_version.startswith("save_money")
+        else "full_experience"
+    )
 
     tracker = TokenUsageTracker()
     t_request_start = time.monotonic()
+
+    _set_association_properties(
+        session_id=session_id,
+        run_id=run_id,
+        destination=request.destination or "",
+        budget_mode=budget_mode,
+        prompt_version=prompt_version,
+    )
 
     stream_config: RunnableConfig = {
         "metadata": {
@@ -740,10 +736,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             "travelshaper.destination": request.destination or "",
             "travelshaper.departure": request.departure or "",
             "travelshaper.prompt_version": prompt_version,
-            "travelshaper.budget_mode": (
-                "save_money" if prompt_version.startswith("save_money")
-                else "full_experience"
-            ),
+            "travelshaper.budget_mode": budget_mode,
             "travelshaper.has_preferences": bool(
                 request.preferences and request.preferences.strip()
             ),
@@ -862,7 +855,8 @@ def health() -> dict:
 def feedback(request: FeedbackRequest) -> FeedbackResponse:
     """Capture user feedback on a travel briefing.
 
-    Stores feedback locally (JSONL) and best-effort syncs to Phoenix.
+    Feedback is stored to a local JSONL file. Trace-side annotation is now
+    handled by Observe and is no longer synced from this endpoint.
     """
     # Validate score
     if request.score not in (1, -1):
@@ -881,12 +875,7 @@ def feedback(request: FeedbackRequest) -> FeedbackResponse:
     # Store locally (always succeeds)
     _store_feedback(request)
 
-    # Best-effort sync to Phoenix
-    synced = _sync_feedback_to_phoenix(
-        request.run_id, request.score, request.comment
-    )
-
-    return FeedbackResponse(status="received", synced_to_phoenix=synced)
+    return FeedbackResponse(status="received", synced_to_phoenix=False)
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

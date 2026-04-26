@@ -1,18 +1,15 @@
 """TravelShaper agent — LangGraph-based travel planning assistant.
 
 Orchestrates four tools (flights, hotels, cultural guide, DuckDuckGo search)
-through a ReAct-style loop built with LangGraph. Phoenix / OpenInference
-tracing is enabled when the optional phoenix extras are installed.
+through a ReAct-style loop built with LangGraph. LLM tracing is provided by
+the Traceloop SDK (OpenLLMetry); spans are exported via OTLP to whatever
+collector is configured by TRACELOOP_BASE_URL (typically the Observe Agent
+on localhost:4318).
 """
 
+import logging
 import operator
-import os
-import re
-import sys
-from pathlib import Path
 from typing import Annotated, Literal
-
-import yaml
 
 from dotenv import load_dotenv
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -28,150 +25,38 @@ from tools.cultural_guide import get_cultural_guide
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
-# Tracing configuration (loaded from tracing.yaml)
+# Tracing — Traceloop SDK (OpenLLMetry) → Observe Agent
 # ---------------------------------------------------------------------------
 
-def _load_tracing_config() -> dict:
-    """Load tracing.yaml and resolve ${ENV_VAR} / ${ENV_VAR:-default} refs."""
-    config_path = Path(__file__).parent / "tracing.yaml"
-    if not config_path.exists():
-        return {"OTEL_DESTINATION": "phoenix"}
-
-    raw = config_path.read_text()
-
-    def _resolve(match):
-        expr = match.group(1)
-        if ":-" in expr:
-            var, default = expr.split(":-", 1)
-            return os.getenv(var.strip(), default.strip())
-        return os.getenv(expr.strip(), "")
-
-    resolved = re.sub(r"\$\{([^}]+)}", _resolve, raw)
-    return yaml.safe_load(resolved) or {}
+# Backend identifier exposed to api.py for trace URL formatting.
+TRACE_DESTINATION = "observe"
 
 
 def _init_tracing() -> None:
-    """Best-effort tracing setup driven by tracing.yaml.
+    """Initialize Traceloop instrumentation for LangChain / OpenAI.
 
-    Reads OTEL_DESTINATION from tracing.yaml and configures the matching
-    backend. All three backends return a standard TracerProvider that the
-    LangChain instrumentor uses identically.
-
-    Failures are non-fatal — the app serves requests without tracing.
+    Traceloop reads its OTLP endpoint from TRACELOOP_BASE_URL and exports
+    spans there (defaults to http://localhost:4318). Failures are non-fatal.
     """
     try:
-        from openinference.instrumentation.langchain import LangChainInstrumentor
+        from traceloop.sdk import Traceloop
     except ImportError:
-        return  # Instrumentation packages not installed — tracing disabled silently
+        return  # tracing is optional — silently skip when SDK isn't installed
 
     try:
-        config = _load_tracing_config()
-        destination = config.get("OTEL_DESTINATION", "phoenix").lower().strip()
-
-        if destination == "arize":
-            tracer_provider = _init_arize(config.get("arize", {}))
-        elif destination == "custom":
-            tracer_provider = _init_custom(config.get("custom", {}))
-        else:
-            tracer_provider = _init_phoenix(config.get("phoenix", {}))
-
-        LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
-        print(
-            f"[TravelShaper] Tracing initialized -> {destination}",
-            file=sys.stderr,
+        Traceloop.init(
+            app_name="travelshaper",
+            telemetry_enabled=False,
         )
+        logger.info("Tracing initialized via Traceloop SDK")
     except Exception as exc:
-        print(
-            f"[TravelShaper] Tracing init failed (non-fatal): {exc}",
-            file=sys.stderr,
-        )
-
-
-def _init_phoenix(cfg: dict):
-    """Configure tracing for Phoenix (local or Phoenix Cloud)."""
-    from phoenix.otel import register
-
-    return register(
-        project_name=cfg.get("project_name", "travelshaper"),
-        endpoint=cfg.get("endpoint", "http://localhost:6006/v1/traces"),
-    )
-
-
-def _init_arize(cfg: dict):
-    """Configure tracing for Arize AX (cloud).
-
-    Requires space_id and api_key in tracing.yaml (typically via ${ENV_VAR}).
-    """
-    from arize.otel import register
-
-    space_id = cfg.get("space_id", "")
-    api_key = cfg.get("api_key", "")
-
-    if not space_id or not api_key:
-        raise ValueError(
-            "arize.space_id and arize.api_key required in tracing.yaml "
-            "(set ARIZE_SPACE_ID and ARIZE_API_KEY in .env)"
-        )
-
-    kwargs = {
-        "space_id": space_id,
-        "api_key": api_key,
-        "project_name": cfg.get("project_name", "travelshaper"),
-    }
-
-    endpoint = cfg.get("endpoint", "")
-    if endpoint:
-        kwargs["endpoint"] = endpoint
-
-    return register(**kwargs)
-
-
-def _init_custom(cfg: dict):
-    """Configure tracing for any OTLP-compatible endpoint.
-
-    Uses the raw OTEL SDK — no vendor wrapper packages needed. Supports
-    http/protobuf (default), grpc, and http/json protocols.
-    """
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.resources import Resource
-
-    endpoint = cfg.get("endpoint", "")
-    if not endpoint:
-        raise ValueError("custom.endpoint required in tracing.yaml")
-
-    protocol = cfg.get("protocol", "http/protobuf")
-    headers = cfg.get("headers", {}) or {}
-    # Strip empty-string headers (unresolved env vars)
-    headers = {k: v for k, v in headers.items() if v}
-
-    resource = Resource(attributes={
-        "service.name": cfg.get("service_name", "travelshaper"),
-    })
-    provider = TracerProvider(resource=resource)
-
-    if protocol == "grpc":
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-            OTLPSpanExporter,
-        )
-    else:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-            OTLPSpanExporter,
-        )
-        if protocol == "http/json":
-            headers["Content-Type"] = "application/json"
-
-    exporter = OTLPSpanExporter(endpoint=endpoint, headers=headers)
-    provider.add_span_processor(BatchSpanProcessor(exporter))
-    return provider
+        logger.warning("Tracing init failed (non-fatal): %s", exc)
 
 
 _init_tracing()
-
-# Expose destination for api.py trace URL helper
-_TRACING_CONFIG = _load_tracing_config()
-TRACE_DESTINATION = _TRACING_CONFIG.get("OTEL_DESTINATION", "phoenix").lower().strip()
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -364,9 +249,9 @@ which tells its own story about a city that guards its secrets."
 # ---------------------------------------------------------------------------
 # Prompt versioning
 # ---------------------------------------------------------------------------
-# Bump the version suffix when you edit a prompt's text. This makes the change
-# visible in Phoenix traces so you can compare eval scores across revisions
-# (filter by travelshaper.prompt_version).
+# Bump the version suffix when you edit a prompt's text. The version is
+# attached to traces via Traceloop association properties so you can
+# compare prompt revisions in Observe.
 
 SAVE_MONEY_PROMPT_VERSION = "save_money_v1"
 FULL_EXPERIENCE_PROMPT_VERSION = "full_experience_v1"

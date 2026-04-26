@@ -1,6 +1,6 @@
 # Docker Specification — TravelShaper Travel Assistant
 
-**Version:** 2.3 (v0.2.3)
+**Version:** 3.0 (v0.3.0)
 
 ---
 
@@ -31,8 +31,10 @@ RUN poetry config virtualenvs.create false \
 # Copy application code
 COPY . .
 
-# Ensure static directory exists (serves the browser chat UI)
-RUN mkdir -p /app/static
+# Ensure runtime directories exist
+# - /app/static serves the browser chat UI
+# - /app/logs holds the structured JSON log file tailed by the Observe Agent
+RUN mkdir -p /app/static /app/logs
 
 # Expose API port
 EXPOSE 8000
@@ -68,22 +70,21 @@ services:
       - "8000:8000"
     env_file: .env
     environment:
-      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
-      - ARIZE_SPACE_ID=${ARIZE_SPACE_ID:-}
-      - ARIZE_API_KEY=${ARIZE_API_KEY:-}
-      - ARIZE_PROJECT_NAME=${ARIZE_PROJECT_NAME:-travelshaper}
-      - ARIZE_ENDPOINT=${ARIZE_ENDPOINT:-}
-    depends_on:
-      phoenix:
-        condition: service_started
-    restart: unless-stopped
-
-  phoenix:
-    image: arizephoenix/phoenix:latest
-    ports:
-      - "6006:6006"
+      - TRACELOOP_BASE_URL=${TRACELOOP_BASE_URL:-http://localhost:4318}
+      - TRACELOOP_TRACE_CONTENT=${TRACELOOP_TRACE_CONTENT:-true}
+      - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-service.name=travelshaper,service.version=0.3.0}
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
 ```
+
+The compose file defines a single `travelshaper` service. The Observe Agent is
+**not** a compose service — it runs on the host and is managed by the operator.
+Spans are exported via OTLP HTTP to `TRACELOOP_BASE_URL` (default
+`http://localhost:4318`) where the Observe Agent receives them and forwards to
+Observe. Structured JSON logs are written to `/app/logs/travelshaper.log` inside
+the container; the bind mount `./logs:/app/logs` exposes that file on the host
+so the Observe Agent's filelog receiver can tail it.
 
 ---
 
@@ -93,13 +94,16 @@ services:
 The lockfile pins exact versions of every dependency and their transitive deps,
 ensuring reproducible builds across environments.
 
-**Phoenix tracing packages (`arize-phoenix-otel`, `openinference-instrumentation-langchain`):**
-These are regular Poetry dependencies in `pyproject.toml` (with a `python = ">=3.11,<3.15"`
-marker to satisfy the upstream Python version constraint).
+**Tracing dependency (`traceloop-sdk`):**
+Traceloop SDK (OpenLLMetry) is a regular Poetry dependency in `pyproject.toml`.
+It auto-instruments LangChain/LangGraph and the OpenAI SDK and exports OTLP
+HTTP spans to the Observe Agent. No Phoenix or Arize packages are installed.
 
-**Why `arize-phoenix` (the full server) is NOT installed in this container:**
-The full Phoenix server package would conflict with TravelShaper's FastAPI version.
-Phoenix runs in its own container (`arizephoenix/phoenix:latest`).
+**Observe Agent runs outside docker-compose:**
+The Observe Agent is operator-managed on the host. It listens on the OTLP HTTP
+port for Traceloop spans and tails `./logs/travelshaper.log` via its filelog
+receiver. Keeping it out of compose lets a single agent serve multiple
+applications and matches Observe's recommended deployment model.
 
 **Why `openai` is an explicit dependency:**
 The `openai` SDK is a transitive dependency of `langchain-openai`. It is

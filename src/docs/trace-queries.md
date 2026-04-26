@@ -1,13 +1,13 @@
-# Trace Queries — 11 Queries for Phoenix Tracing
+# Trace Queries — 11 Queries for Observe Tracing
 
-**Run these after starting both TravelShaper and Phoenix.**  
-Each query uses the full JSON schema — `departure`, `destination`, and `preferences` fields included — exactly as the browser UI submits them. This exercises place validation, voice routing, and all four tools.
+**Run these after starting TravelShaper, with the Observe Agent running on the host.**  
+Each query uses the full JSON schema — `departure`, `destination`, and `preferences` fields included — exactly as the browser UI submits them. This exercises place validation, voice routing, and all four tools. The queries themselves are unchanged from previous tracing backends; only the destination differs — Traceloop now exports OTLP HTTP spans to the Observe Agent, which forwards them to Observe.
 
 Run the whole set in one shot:
 ```bash
 chmod +x run_traces.sh && ./run_traces.sh
 ```
-Or paste individual queries below. All dates in `run_traces.sh` are computed dynamically relative to today, so the script never goes stale. The dates shown below are illustrative examples. Traces appear at `http://localhost:6006` within seconds.
+Or paste individual queries below. All dates in `run_traces.sh` are computed dynamically relative to today, so the script never goes stale. The dates shown below are illustrative examples. Traces appear in your Observe workspace within seconds.
 
 ---
 

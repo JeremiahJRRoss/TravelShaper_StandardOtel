@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.3.0] — 2026-04-25
+
+### Migrate tracing from Arize Phoenix to Observe Inc
+
+#### Changed
+- Migrated tracing from Arize Phoenix / Arize AX / custom OTLP backends
+  to Observe Inc via the Traceloop SDK (OpenLLMetry).
+- Traces are now exported via OTLP HTTP to `TRACELOOP_BASE_URL`
+  (default `http://localhost:4318`), where the Observe Agent forwards
+  them to the Observe cloud.
+- Added structured JSON logging to `/app/logs/travelshaper.log` for the
+  Observe Agent's filelog receiver. A human-readable copy still goes to
+  stderr for local development.
+- Added `Traceloop.set_association_properties()` calls in `/chat` and
+  `/chat/stream` so session_id, run_id, destination, budget_mode, and
+  prompt_version filter cleanly in the Observe LLM Explorer.
+- `OTEL_RESOURCE_ATTRIBUTES` is now split between layers: the app sets
+  `service.name` / `service.version`; the Observe Agent's resource
+  processor owns `deployment.environment` and other infra attributes.
+- Simplified the Dockerfile (no conditional Poetry extras) and
+  docker-compose.yml (no Phoenix container, no Arize/Phoenix env vars).
+- Bumped package and FastAPI app version to `0.3.0`.
+
+#### Removed
+- `tracing.yaml` and the YAML-driven backend selection in `agent.py`
+  (`_load_tracing_config`, `_init_phoenix`, `_init_arize`, `_init_custom`).
+- Optional Poetry extras `phoenix`, `arize`, and `custom` from
+  `pyproject.toml`. The corresponding packages — `arize-phoenix-otel`,
+  `arize-otel`, `openinference-instrumentation-langchain`,
+  `opentelemetry-exporter-otlp-proto-http`, and `pyyaml` — are gone too.
+- The Phoenix container (`arizephoenix/phoenix:latest`) and its
+  `depends_on` link from docker-compose.yml.
+- `evaluations/` directory (the Phoenix `llm_classify` eval pipeline:
+  frustration, tool_correctness, answer_completeness, tool_output_quality).
+- `scripts/export_spans.py` (Phoenix span export to CSV) and
+  `scripts/sync_feedback.py` (Phoenix feedback annotation sync).
+- `_sync_feedback_to_phoenix()` in `api.py`. The `/feedback` endpoint
+  still stores submissions to `feedback.jsonl` but always returns
+  `synced_to_phoenix: false`.
+
+#### Preserved
+- All 4 tools, agent graph topology, dual-voice system prompts, and SSE
+  streaming behavior.
+- `RunnableConfig` metadata propagation, token / cost tracking,
+  SLA timing budgets, and local feedback storage.
+- All 11 trace queries in `run_traces.sh`.
+- Eval prompts documented in `docs/evaluation-prompts.md` so the
+  pipeline can be reimplemented against Observe later.
+
 ## [0.2.5] — 2026-04-09
 
 ### Trace URL fix + dead env var cleanup

@@ -1,6 +1,6 @@
 # Software Architecture Document — TravelShaper Travel Assistant
 
-**Version:** 2.1 (v0.1.5)
+**Version:** 3.0 (v0.3.0 — Observe migration)
 **Date:** April 2026
 **Status:** Implementation phase
 
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-TravelShaper is a LangGraph-based travel planning agent exposed via a FastAPI HTTP API. It accepts a natural-language travel request, dispatches specialized tools to gather flight, hotel, and cultural intelligence, and returns a synthesized travel briefing. All LLM and tool activity is traced via Arize Phoenix.
+TravelShaper is a LangGraph-based travel planning agent exposed via a FastAPI HTTP API. It accepts a natural-language travel request, dispatches specialized tools to gather flight, hotel, and cultural intelligence, and returns a synthesized travel briefing. All LLM and tool activity is traced via the Traceloop SDK (OpenLLMetry), exported as OTLP to a host-side Observe Agent that forwards traces and tailed logs to Observe cloud.
 
 This document describes the software architecture: component design, data flow, external dependencies, deployment topology, and the decisions behind each choice.
 
@@ -22,7 +22,7 @@ TravelShaper's architecture is optimized for five goals:
 
 2. **Keep the agent workflow simple and explainable.** The design preserves the starter app's ReAct-style graph and adds tools without introducing unnecessary orchestration complexity. The graph topology adds one entry node (`route_and_inject`) for voice selection — the tool loop itself does not change.
 
-3. **Make tool use observable and evaluable.** Phoenix must capture LLM calls, tool calls, and full request traces. Evaluation metrics (user frustration, tool correctness, answer completeness) must be runnable against collected traces.
+3. **Make tool use observable.** Observe (via the Traceloop SDK and the Observe Agent) must capture LLM calls, tool calls, full request traces, and structured application logs, with traces and logs correlated by `trace_id` so engineers can pivot between them in the Observe UI.
 
 4. **Support local demo and production discussion.** The architecture must run locally with Docker and also support a credible production deployment story with scaling, latency, and cost considerations for the presentation.
 
@@ -55,12 +55,18 @@ TravelShaper's architecture is optimized for five goals:
                          └────────┘ └────────┘ └────────┘ └────────┘ └────────┘
 
                               ▲
-                              │ traces (OTLP)
-                              ▼
-                         ┌────────────┐
-                         │   Phoenix  │
-                         │   (local)  │
-                         └────────────┘
+                              │ traces (OTLP/HTTP)        logs (JSON file tail)
+                              │   ───────────────┐      ┌──────────────────
+                              ▼                  ▼      ▼
+                                          ┌──────────────────────┐
+                                          │   Observe Agent      │
+                                          │   (host process)     │
+                                          └──────────┬───────────┘
+                                                     │ traces + logs
+                                                     ▼
+                                          ┌──────────────────────┐
+                                          │    Observe Cloud     │
+                                          └──────────────────────┘
 ```
 
 **External dependencies:**
@@ -70,7 +76,8 @@ TravelShaper's architecture is optimized for five goals:
 | OpenAI API | LLM reasoning and synthesis | API key | Fatal — agent cannot function |
 | SerpAPI | Flights, hotels, scoped web search | API key | Degraded — falls back to DuckDuckGo |
 | DuckDuckGo | General web search | None | Degraded — agent relies on LLM knowledge |
-| Phoenix | Trace collection and evaluation | None (local) | Silent — app functions, traces lost |
+| Observe Agent (host) | Receives OTLP traces from the app and tails `/app/logs/travelshaper.log`; forwards both signals to Observe cloud | Configured on the host; app-side requires no credentials | Silent — app functions, telemetry buffered/dropped |
+| Observe Cloud | Trace and log storage, LLM Explorer, dashboards | Token configured on the agent | Silent — telemetry not visible until agent reconnects |
 
 ---
 
@@ -89,14 +96,7 @@ src/
 │   ├── flights.py             # search_flights
 │   ├── hotels.py              # search_hotels
 │   └── cultural_guide.py      # get_cultural_guide
-├── evaluations/
-│   ├── run_evals.py           # Evaluation runner (3 metrics)
-│   └── metrics/
-│       ├── frustration.py     # Reference frustration prompt (production uses Phoenix built-in)
-│       ├── answer_completeness.py # ANSWER_COMPLETENESS_PROMPT
-│       └── tool_correctness.py# TOOL_CORRECTNESS_PROMPT
-├── scripts/
-│   └── export_spans.py        # Export Phoenix spans to CSV
+├── logging_config.py          # setup_logging() — JSON formatter + trace_id injection
 ├── tests/
 │   ├── test_tools.py          # 4 tool tests
 │   ├── test_agent.py          # 2 agent graph tests
@@ -115,13 +115,15 @@ Owns the FastAPI application, request/response models, endpoint routing, and inp
 Delegates intelligence to the agent. Stateless — no session management.
 
 Endpoints:
-- `POST /chat` — synchronous; accepts `{"message": str, "preferences": str|null, "departure": str|null, "destination": str|null}`; returns `{"response": str, "run_id": str}`. When `TRAVELSHAPER_DEBUG=true`, the response also includes a `debug` object with `trace_url` pointing to the Phoenix UI trace view. Used by curl and tests.
+- `POST /chat` — synchronous; accepts `{"message": str, "preferences": str|null, "departure": str|null, "destination": str|null}`; returns `{"response": str, "run_id": str}`. When `TRAVELSHAPER_DEBUG=true`, the response also includes a `debug` object with `trace_url` returned by `_trace_url(run_id)` — currently `"trace:{run_id}"`, since Observe does not expose a per-run deep link. Used by curl and tests.
 - `POST /chat/stream` — SSE streaming; same request body; emits real-time `status`, `place_corrected`, `place_error`, `validation_error`, `done`, and `error` events. The SSE `done` event always includes `run_id`. Used by the browser UI.
 - `GET /health` — returns `{"status": "ok"}`
 - `POST /feedback` — accepts `{ run_id, session_id, score, comment }`;
-  stores feedback to local JSONL, best-effort syncs to Phoenix as a
-  "User Feedback" annotation. Score must be `1` or `-1`. Rate-limited
-  to 20 submissions per session per 5-minute window.
+  stores feedback to local JSONL. The response always includes
+  `synced_to_phoenix: false` — the field is preserved for the UI but no
+  external sync occurs in the Observe architecture. Score must be `1`
+  or `-1`. Rate-limited to 20 submissions per session per 5-minute
+  window.
 - `GET /` — serves the browser chat UI (`static/index.html`)
 
 Validation pipeline (runs before agent invocation):
@@ -165,9 +167,21 @@ Each tool is a self-contained module that:
 
 Tools do not call each other. Tools do not access agent state. Tools are independently testable.
 
-**evaluations/ — Phoenix evaluation scripts**
+**evaluations/ — removed during Observe migration**
 
-Standalone scripts that run after traces are collected. Not part of the request path. Read spans from Phoenix, apply evaluation logic, and write results back to Phoenix as annotations.
+The Phoenix-backed evaluation runner and associated metric prompts were
+removed during the migration to Observe. Reimplementation against
+Observe's trace store is pending — see `docs/evaluation-prompts.md` for
+the preserved prompt text that a future evaluator should consume.
+
+**logging_config.py — structured logging**
+
+`setup_logging()` configures the root Python logger to emit JSON-formatted
+records to `/app/logs/travelshaper.log` (rotated). Each record carries the
+active `trace_id` (and `span_id` when available) sourced from the OTEL
+context, which lets Observe join logs to traces server-side. Inside Docker,
+the host bind-mounts `./logs:/app/logs` so the host-side Observe Agent's
+filelog receiver can tail the file.
 
 **tests/ — Test suite**
 
@@ -283,7 +297,7 @@ The guiding principle: provide the best possible partial briefing rather than re
 
 ### 6.1 LangGraph over plain LangChain
 
-The starter app uses LangGraph's `StateGraph` rather than LangChain's `AgentExecutor`. This gives explicit control over the agent loop: we can see exactly which nodes fire, in what order, and with what state. Phoenix traces map cleanly to graph nodes, making observability richer.
+The starter app uses LangGraph's `StateGraph` rather than LangChain's `AgentExecutor`. This gives explicit control over the agent loop: we can see exactly which nodes fire, in what order, and with what state. Traceloop's LangChain auto-instrumentation maps each graph node to a span, so the structure stays visible in Observe.
 
 The ReAct loop (llm → tool → llm → ... → end) is the simplest useful agent pattern and matches the assessment's scope.
 
@@ -313,14 +327,20 @@ Already present in the starter code. No API key needed. Provides general web sea
 
 Already present in the starter code. Async-capable, automatic OpenAPI docs at `/docs`, Pydantic validation on request/response models. No reason to change it.
 
-### 6.6 Phoenix for observability
+### 6.6 Observe + Traceloop for observability
 
-Phoenix was chosen because:
-- Required by the assessment
-- OpenTelemetry-native — traces capture LLM calls, tool usage, and latency automatically
-- Local-first — runs as a local server, no cloud account needed
-- Built-in evaluation framework for user frustration and custom metrics
-- LangGraph integration via `openinference-instrumentation-langchain`
+Observe (with the Traceloop SDK as the in-process exporter) was chosen because:
+- OpenTelemetry-native — Traceloop emits standard OTLP, so the app stays
+  vendor-neutral; only the agent endpoint changes if the backend is swapped
+- Auto-instrumentation of LangChain, LangGraph, and the OpenAI SDK with no
+  application code reaching into OTEL primitives
+- Single Observe Agent on the host receives both traces (OTLP HTTP on
+  `:4318`) and logs (filelog tail of the JSON log file), so logs and
+  traces correlate via `trace_id` server-side
+- LLM Explorer in Observe consumes Traceloop's association properties
+  (`user_id`, `chat_id`, plus our custom `destination`, `budget_mode`,
+  `prompt_version`) for filtering and grouping, with no additional
+  instrumentation work in the app
 
 ---
 
@@ -328,82 +348,79 @@ Phoenix was chosen because:
 
 ### 7.1 Instrumentation
 
-Tracing is initialized at application startup via `_init_tracing()` in `agent.py`. This is the **only** file that imports OTEL packages — all other tracing flows through LangChain's callback/instrumentor system.
+Tracing is initialized at application startup via `_init_tracing()` in
+`agent.py`. This is the **only** file that imports tracing-SDK packages —
+the rest of the application reaches the trace context indirectly (via
+`Traceloop.set_association_properties()` in `api.py`, or via the
+`trace_id`/`span_id` fields injected into log records by
+`logging_config.setup_logging()`).
 
-#### Trace routing
+#### Trace export
 
-Trace destination is configured in `tracing.yaml` via `OTEL_DESTINATION`:
+`_init_tracing()` calls `Traceloop.init(app_name="travelshaper")` from the
+Traceloop SDK (OpenLLMetry). Traceloop auto-instruments LangChain,
+LangGraph, and the OpenAI SDK and exports OTLP/HTTP to `TRACELOOP_BASE_URL`
+(default `http://localhost:4318`), where the **Observe Agent** is listening.
+The Observe Agent then forwards traces to Observe cloud over the network.
 
-| Destination | Package | Endpoint | Auth |
-|-------------|---------|----------|------|
-| `phoenix` (default) | `arize-phoenix-otel` | `PHOENIX_COLLECTOR_ENDPOINT` | Optional `PHOENIX_API_KEY` |
-| `arize` | `arize-otel` | `otlp.arize.com:443` (gRPC) | `ARIZE_SPACE_ID` + `ARIZE_API_KEY` |
-| `custom` | *(none — OTEL SDK only)* | `OTEL_EXPORTER_OTLP_ENDPOINT` | `OTEL_AUTH_TOKEN` via headers |
+`agent.py` also exports the constant `TRACE_DESTINATION = "observe"` so that
+other modules (and span attributes) can refer to the active backend without
+re-reading config.
 
-All three produce identical OpenInference spans via the same `LangChainInstrumentor`.
-The choice affects only where OTLP data is exported.
+| Component | Role |
+|-----------|------|
+| Traceloop SDK (in-process) | Auto-instruments LangChain / OpenAI; exports OTLP/HTTP |
+| Observe Agent (host process) | Receives OTLP on `:4318`, tails `/app/logs/travelshaper.log`, forwards both to Observe cloud |
+| Observe cloud | Trace storage, log storage, LLM Explorer, dashboards |
 
-The config file is read at two stages:
-- **Build time** by the Dockerfile to install only the needed Poetry extras
-- **Runtime** by `agent.py` to initialize the correct TracerProvider
+The Observe Agent is **not** a docker-compose service. It runs on the host
+and is provisioned out of band. Inside Docker, the application bind-mounts
+`./logs:/app/logs` so the agent's filelog receiver can tail the same JSON
+log file the application writes.
 
-Secrets use `${ENV_VAR}` syntax in `tracing.yaml` and are resolved from the
-container environment (`.env` file) at runtime.
+`OTEL_RESOURCE_ATTRIBUTES` is split between the two layers:
+- **Application** sets `service.name=travelshaper` and
+  `service.version=0.3.0` so every emitted span / log carries them.
+- **Observe Agent** sets `deployment.environment`, `host.name`, and other
+  environment-level attributes via its resource processor — these are
+  applied uniformly to traces and logs as they pass through the agent.
 
-Typical pattern: Phoenix for local development and CI, Arize AX for staging
-and production, custom for enterprise observability platforms (Cribl, Honeycomb,
-Grafana Tempo, Datadog, etc.).
+#### Association properties (Observe LLM Explorer)
 
-The initialization is split into five functions:
+`api.py` calls `Traceloop.set_association_properties()` on every request to
+attach request-level metadata that becomes filterable in Observe's LLM
+Explorer:
 
-- `_load_tracing_config()` — loads `tracing.yaml`, resolves `${ENV_VAR}` refs.
-- `_init_tracing()` — entry point; imports the instrumentor, dispatches to the
-  appropriate backend based on config, then instruments.
-- `_init_phoenix(cfg)` — configures Phoenix via `phoenix.otel.register()`.
-- `_init_arize(cfg)` — configures Arize AX via `arize.otel.register()`.
-- `_init_custom(cfg)` — configures any OTLP endpoint via raw OTEL SDK.
-  Supports `http/protobuf` (default), `grpc`, and `http/json` protocols.
+| Property | Source | Example |
+|----------|--------|---------|
+| `user_id` | Browser session id (stable per-tab) | `"a1b2c3d4-..."` |
+| `chat_id` | Per-request `run_id` | `"r-7f3..."` |
+| `destination` | `TRACE_DESTINATION` (constant) | `"observe"` |
+| `budget_mode` | Derived from prompt version | `"save_money"` |
+| `prompt_version` | `get_prompt_version()` in `agent.py` | `"save_money_v1"` |
 
-**Key design principle:** `api.py` does not import `opentelemetry` directly. Instead, it attaches request-level metadata (destination, departure, budget mode) via LangChain's `RunnableConfig`, which the instrumentor propagates to all child spans automatically. This means swapping the OTEL backend requires editing one line in `tracing.yaml` — no code changes needed.
+Traceloop propagates these as span attributes automatically — no module
+outside `api.py` and `agent.py` touches the OTEL API directly. The
+validation classifiers (`validate_place`, `validate_preferences`) use
+LangChain's `ChatOpenAI`, so their LLM calls appear as traced spans
+alongside the agent's own LLM and tool spans.
 
-The validation classifiers (`validate_place`, `validate_preferences`) use LangChain's `ChatOpenAI` instead of the raw OpenAI SDK, so their LLM calls appear as traced spans alongside the agent's own LLM and tool spans. Each key invocation is tagged with a `run_name` for easy identification in Phoenix:
+### 7.1a Structured logging and trace correlation
 
-| Invocation | `run_name` |
-|------------|------------|
-| Agent LLM call | `travelshaper_llm_call` |
-| Validation classifier | `validation_classifier` |
-| `/chat` request | `travelshaper_chat` |
-| `/chat/stream` request | `travelshaper_stream` |
+`logging_config.setup_logging()` configures the root Python logger to emit
+JSON records (one per line) to `/app/logs/travelshaper.log`, with size-based
+rotation. Each record carries:
 
-#### Request-level metadata attributes
+- `timestamp`, `level`, `logger`, `message`
+- `trace_id` and `span_id` pulled from the active OTEL context (when one is
+  active — request-scoped logs are automatically correlated; bare-startup
+  logs are not)
+- `service.name` / `service.version` matching the trace resource
 
-Every request trace carries these attributes in `RunnableConfig.metadata`,
-propagated to all child spans by the LangChain instrumentor:
-
-| Attribute | Source | Example |
-|-----------|--------|---------|
-| `session.id` | Browser `crypto.randomUUID()` or per-request fallback | `"a1b2c3d4-..."` |
-| `travelshaper.prompt_version` | `get_prompt_version()` from `agent.py` | `"save_money_v1"` |
-| `travelshaper.budget_mode` | Derived from prompt version | `"save_money"` |
-| `travelshaper.destination` | Request field | `"Tokyo, Japan"` |
-| `travelshaper.departure` | Request field | `"San Francisco, CA"` |
-| `travelshaper.validation.departure` | Post-validation | `"valid"` / `"corrected"` / `"failed"` |
-| `travelshaper.validation.destination` | Post-validation | Same |
-| `travelshaper.validation.preferences` | Post-validation | `"valid"` / `"failed"` / `"skipped"` |
-| `travelshaper.guardrails.count` | Count of validation calls | `2` |
-| `travelshaper.guardrails.blocked` | Count of rejections | `0` |
-| `travelshaper.total_tokens` | Post-request | `1420` |
-| `travelshaper.estimated_cost_usd` | Post-request | `0.01485` |
-| `travelshaper.sla.budget_ms` | Constant | `35000` |
-| `travelshaper.sla.exceeded` | Post-request | `false` |
-
-Validation classifier spans additionally carry:
-
-| Attribute | Value |
-|-----------|-------|
-| `travelshaper.span_type` | `"guardrail"` |
-| `travelshaper.guardrail.name` | `"place_validation"` or `"preference_validation"` |
-| `travelshaper.guardrail.field` | `"departure"`, `"destination"`, or `"preferences"` |
+Inside Docker the host bind-mounts `./logs:/app/logs`. The Observe Agent's
+filelog receiver tails this file on the host and ships records to Observe
+cloud, where they are joined to traces via the shared `trace_id`. There is
+no log-export call from the application itself — the file is the contract.
 
 ### 7.2 What gets traced
 
@@ -415,78 +432,56 @@ Validation classifier spans additionally carry:
 
 ### 7.3 Trace structure
 
-A typical travel briefing query produces this trace:
+A typical travel briefing query produces this trace (span names come from
+Traceloop's auto-instrumentation of LangChain / LangGraph / OpenAI):
 
 ```
-[Chain] travelshaper_chat (RunnableConfig metadata: destination, departure, budget_mode)
-  ├── [LLM] validation_classifier (place validation — departure)
-  ├── [LLM] validation_classifier (place validation — destination)
-  └── [Chain] agent.invoke
+[Workflow] travelshaper.chat        (association: user_id, chat_id, budget_mode, prompt_version, destination)
+  ├── [LLM] ChatOpenAI               (place validation — departure)
+  ├── [LLM] ChatOpenAI               (place validation — destination)
+  └── [Chain] LangGraph.invoke
         ├── [Chain] route_and_inject (selects voice, injects system prompt)
-        ├── [LLM] travelshaper_llm_call (initial — decides to call tools)
+        ├── [LLM] ChatOpenAI         (initial — decides to call tools)
         ├── [Tool] search_flights
         ├── [Tool] search_hotels
         ├── [Tool] get_cultural_guide
-        └── [LLM] travelshaper_llm_call (synthesis — produces final briefing)
+        └── [LLM] ChatOpenAI         (synthesis — produces final briefing)
 ```
 
-Total spans per query: typically 8–13 depending on how many tools are dispatched, whether place validation triggers, and whether the LLM loops more than once. Validation classifier spans are nested under the request chain because `validate_place()` and `validate_preferences()` receive the endpoint's `RunnableConfig` (which carries the `run_id` / trace context). The LangChain instrumentor uses this to parent the LLM spans correctly.
+Total spans per query: typically 8–13 depending on how many tools are
+dispatched, whether place validation triggers, and whether the LLM loops
+more than once. Validation classifier spans are parented under the request
+workflow because the active OTEL context, established by
+`Traceloop.set_association_properties()` at the top of the request handler,
+covers the whole call tree.
+
+In the Observe UI, the JSON log records emitted along the way are linked to
+the same trace by `trace_id`, so you can pivot from a span to the
+corresponding application log lines (and back) without an extra correlation
+hop.
 
 ### 7.4 Evaluation pipeline
 
-Evaluations run as a separate batch process after traces are collected:
-
-```
-Phoenix (stored traces)
-    │
-    ▼
-run_evals.py
-    ├── Fetch spans from Phoenix
-    ├── [1/4] User Frustration (Phoenix built-in template)
-    ├── [2/4] Tool Usage Correctness (custom prompt)
-    ├── [3/4] Answer Completeness (custom prompt)
-    ├── [4/4] Tool Output Quality (custom prompt)
-    ├── Write annotations back to Phoenix
-    ├── Create per-outcome datasets
-    └── Create golden_set from all-positive traces
-```
-
-Evaluators are LLM-as-judge functions: they send the trace data to GPT-4o with an evaluation prompt and receive a label plus an explanation.
-
-Four metrics chosen based on observed failure modes:
-
-| Metric | What it catches | Labels |
-|--------|----------------|--------|
-| User Frustration | Silent omissions, ignored preferences | frustrated / not_frustrated |
-| Tool Usage Correctness | Wrong tools, bad parameters, missed tools | correct / incorrect |
-| Answer Completeness | Missing sections (scope-aware) | complete / partial / incomplete |
-| Tool Output Quality | Garbage data, wrong destinations, implausible prices | good / degraded / poor |
-
-* **User Frustration** catches the most common end-user-visible failure: the agent silently omitting requested information when a tool returns empty results, or contradicting the user's stated budget preference. Uses Phoenix's built-in template for validated detection.
-* **Tool Usage Correctness** catches the most common agent-level failure: incorrect IATA codes passed to `search_flights`, skipped `get_cultural_guide` calls for international trips, and unnecessary tool calls on vague queries. These are invisible to the user but directly cause the incomplete briefings that frustration detects.
-* **Answer Completeness** fills a gap the other two metrics can't cover: distinguishing intentionally scoped responses (user asked for flights only) from unintentionally incomplete ones (agent failed to search hotels). Its three-tier classification (complete/partial/incomplete) with scope-awareness prevents false positives on scoped queries in the trace set.
-* **Tool Output Quality** catches a failure mode invisible to the other three: the right tool was called with valid parameters, but the data that came back was wrong (SerpAPI rate limit, IATA code that maps to the wrong airport, implausible prices). The LLM confidently synthesises this garbage into a wrong briefing that *looks* complete and correct.
-
-**Per-outcome datasets** are created automatically from traces matching negative
-eval labels. These make it trivial to investigate specific failure modes in
-Phoenix.
-
-**Golden set:** Traces where all four evals scored positive. Use as a regression
-test suite before deploying prompt changes.
-
-**User feedback annotations.** The `POST /feedback` endpoint and
-`scripts/sync_feedback.py` write "User Feedback" annotations to Phoenix
-spans. These appear in the Evaluations tab alongside automated eval results,
-providing ground truth for validating the automated metrics. Feedback is
-stored locally in `feedback.jsonl` as the durable source of truth; Phoenix
-annotations are derived from it.
+> **Status:** removed during the Observe migration; pending reimplementation.
+>
+> The previous LLM-as-judge evaluation runner (`evaluations/`) and the
+> Phoenix-backed annotation sync script (`scripts/sync_feedback.py`) were
+> deleted in the Observe migration. The four eval prompts (User
+> Frustration, Tool Usage Correctness, Answer Completeness, Tool Output
+> Quality) are preserved in `docs/evaluation-prompts.md` so a future
+> implementation against Observe's trace store can pick them up directly.
+>
+> Until then, evaluation is out of scope for the running system. User
+> feedback collected via `POST /feedback` is still written to local
+> `feedback.jsonl` as the durable source of truth — the response always
+> reports `synced_to_phoenix: false`, and no external sync runs.
 
 ### 7.5 Token/cost tracking and latency budgets
 
-A `TokenUsageTracker` (LangChain `BaseCallbackHandler`) is created per request
-and attached to `config["callbacks"]`. It accumulates token counts across all
-LLM calls in the request — both validation classifiers and agent — with
-per-model breakdowns.
+A `TokenUsageTracker` (LangChain `BaseCallbackHandler`) is created per
+request and attached to `config["callbacks"]`. It accumulates token counts
+across all LLM calls in the request — both validation classifiers and
+agent — with per-model breakdowns.
 
 Cost estimation uses approximate per-model rates defined in
 `_COST_PER_1M_TOKENS`. The rate table must be updated manually when provider
@@ -497,13 +492,15 @@ Two request phases are timed separately:
 - **Agent phase:** `agent.invoke()` or `agent.astream()` execution
 
 The `sla_exceeded` flag triggers when total time exceeds `_SLA_TOTAL_S`
-(default 35s). The budget and flag are recorded as span metadata for Phoenix
-dashboards.
+(default 35s). Totals (`total_tokens`, `estimated_cost_usd`,
+`sla.budget_ms`, `sla.exceeded`) are emitted as structured log fields and
+also surface on the workflow span via Traceloop, so they are queryable in
+both the Observe log explorer and the trace view.
 
 **Streaming token counts:** The agent model sets `stream_usage=True`, which
 makes OpenAI include usage data in the final streaming chunk. Without this,
-`on_llm_end` receives no token data during streaming and the tracker records
-zeros.
+`on_llm_end` receives no token data during streaming and the tracker
+records zeros.
 
 ---
 
@@ -659,9 +656,10 @@ Each system prompt has a named version constant (`save_money_v1`,
 `full_experience_v1`). The `get_prompt_version(message)` function in `agent.py`
 is the single source of truth for voice routing — both `route_and_inject()` and
 `api.py`'s config construction import it. When editing prompt text, bump the
-version suffix (e.g., `save_money_v2`). This makes the change visible in
-Phoenix traces: filter by `travelshaper.prompt_version` to compare eval scores
-before and after the edit.
+version suffix (e.g., `save_money_v2`). The version is attached to every
+request as a Traceloop association property (`prompt_version`), so changes
+are visible in Observe's LLM Explorer: filter by `prompt_version` to
+compare behaviour before and after the edit.
 
 ---
 
@@ -754,21 +752,38 @@ Each validation call to `gpt-4o` costs approximately 0.5–1 second. A full requ
 ### 12.1 Local development
 
 ```
-┌─────────────────────────────────────────────┐
-│  Developer machine                          │
-│                                             │
-│  ┌──────────┐     ┌──────────┐              │
-│  │ TravelShaper  │     │ Phoenix  │              │
-│  │ :8000    │────▶│ :6006    │              │
-│  └────┬─────┘     └──────────┘              │
-│       │                                     │
-└───────┼─────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Developer machine                                       │
+│                                                          │
+│  ┌─────────────────┐                                     │
+│  │ TravelShaper    │  OTLP/HTTP (traces)                 │
+│  │ container :8000 │ ──────────────┐                     │
+│  └────┬────────────┘                ▼                    │
+│       │ writes JSON          ┌──────────────┐            │
+│       │ to /app/logs         │ Observe      │            │
+│       │ (bind-mounted        │ Agent        │            │
+│       │  ./logs:/app/logs)   │ (host, :4318)│            │
+│       │                      └──────┬───────┘            │
+│       │  filelog tail               │                    │
+│       └─────────────────────────────┘                    │
+└──────────────────────────────────────────┬───────────────┘
+                                           │ traces + logs
+                                           ▼
+                                    ┌──────────────┐
+                                    │ Observe      │
+                                    │ cloud        │
+                                    └──────────────┘
         │
-        ▼ (outbound HTTPS)
+        ▼ (outbound HTTPS from the app)
    ┌─────────┐  ┌─────────┐  ┌─────────┐
    │ OpenAI  │  │ SerpAPI │  │  DDG    │
    └─────────┘  └─────────┘  └─────────┘
 ```
+
+The Observe Agent is installed and managed on the host — it is not a
+docker-compose service. The application reaches it at
+`TRACELOOP_BASE_URL` (default `http://localhost:4318`), and the agent's
+filelog receiver reads the same `./logs` directory the container writes to.
 
 ### 12.2 Docker Compose
 
@@ -779,18 +794,23 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
-    depends_on:
-      - phoenix
-
-  phoenix:
-    image: arizephoenix/phoenix:latest
-    ports:
-      - "6006:6006"
+    environment:
+      - TRACELOOP_BASE_URL=http://host.docker.internal:4318
+    volumes:
+      - ./logs:/app/logs
 ```
+
+There is no observability container in compose. The Observe Agent is
+provisioned on the host (with its own configuration for OTLP receiver,
+filelog receiver, resource processor, and Observe-cloud exporter) and runs
+independently of the application's lifecycle.
 
 ### 12.3 Production architecture (proposed, not implemented)
 
-Horizontal scaling behind a load balancer, Redis for caching + future session memory, separate OTEL collector for async trace export.
+Horizontal scaling behind a load balancer, Redis for caching + future
+session memory, and one Observe Agent per host (or a small fleet behind a
+load balancer) sized to the trace + log throughput of the application
+tier.
 
 ---
 
@@ -804,7 +824,7 @@ Horizontal scaling behind a load balancer, Redis for caching + future session me
 | API authentication | None — open endpoint. Acceptable for local demo. |
 | Input validation | Pydantic model validates request shape; LLM classifiers validate content |
 | Prompt injection | System prompt is hardcoded; user message is treated as untrusted; preferences field is LLM-classified |
-| Data persistence | No user data stored beyond Phoenix traces |
+| Data persistence | No user data stored beyond Observe traces and `feedback.jsonl` |
 | HTTPS | Not configured — local HTTP only |
 
 ### 13.2 Production additions
@@ -814,7 +834,7 @@ Horizontal scaling behind a load balancer, Redis for caching + future session me
 - HTTPS via load balancer TLS termination
 - Input sanitization before tool dispatch
 - Audit logging for all tool calls
-- Phoenix traces redacted of PII before long-term storage
+- Observe traces and tailed log records redacted of PII before long-term storage
 
 ---
 
@@ -856,9 +876,9 @@ The architecture is designed to evolve without rewrites. Each phase extends the 
 | LLM provider | OpenAI GPT-5.3 (agent) / GPT-4o (validation) | Strong tool-calling support; well-documented |
 | Travel data source | SerpAPI | Single API key for flights + hotels + search; structured JSON |
 | General search | DuckDuckGo | No API key needed; already in starter code |
-| Observability | Arize Phoenix | Required by assessment; local-first; built-in evaluation framework |
+| Observability | Observe (via Traceloop SDK + host-side Observe Agent) | OTel-native via OpenLLMetry; single agent receives traces and tails the JSON log file; LLM Explorer filtering via association properties |
 | HTTP framework | FastAPI | Already in starter code; async-capable |
-| Deployment | Docker + Docker Compose | Docker is assessment requirement; Compose simplifies Phoenix co-deployment |
+| Deployment | Docker + Docker Compose | Docker is assessment requirement; Compose runs only the app — the Observe Agent runs on the host |
 
 ---
 
@@ -871,7 +891,9 @@ The architecture is designed to evolve without rewrites. Each phase extends the 
 | Tool | A Python function registered with LangChain's `@tool` decorator, callable by the LLM |
 | Span | A single unit of work in a trace (one LLM call, one tool execution) |
 | Trace | An end-to-end record of a user request, composed of multiple spans |
-| Phoenix | Arize's open-source observability platform for LLM applications |
-| OpenInference | The semantic convention for LLM observability spans, built on OpenTelemetry |
+| Observe | Observe Inc.'s observability platform; receives traces and logs and provides the LLM Explorer used to inspect agent behaviour |
+| Observe Agent | Host process that listens for OTLP, tails the application's JSON log file, and forwards both signals to Observe cloud |
+| Traceloop SDK | OpenLLMetry's in-process tracing SDK — auto-instruments LangChain / LangGraph / OpenAI and exports OTLP/HTTP |
+| OpenLLMetry | OpenTelemetry-based instrumentation conventions for LLM applications, implemented by the Traceloop SDK |
 | SerpAPI | A web API that returns structured Google search results |
 | OTEL / OTLP | OpenTelemetry / OpenTelemetry Protocol |

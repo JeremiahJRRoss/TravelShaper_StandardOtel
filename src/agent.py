@@ -53,7 +53,7 @@ def _init_tracing() -> None:
         return  # tracing is optional — silently skip when SDK isn't installed
 
     protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf").lower().strip()
-    init_kwargs: dict = {"app_name": "travelshaper", "telemetry_enabled": False}
+    init_kwargs: dict = {"app_name": "travelshaper"}
 
     if protocol == "grpc":
         try:

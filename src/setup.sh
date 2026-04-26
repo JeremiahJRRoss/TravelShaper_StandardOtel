@@ -64,6 +64,10 @@ fi
 
 echo "✓ Prerequisites found (using ${runtime_cmd})"
 
+# Pre-create the host-side logs dir so the ./logs:/app/logs bind mount
+# has somewhere to land (rootless Podman does not auto-create it).
+mkdir -p logs
+
 # ── 3. Create .env file ───────────────────────────────────────────────────────
 if [ -f .env ]; then
   echo "✓ .env already exists — skipping"

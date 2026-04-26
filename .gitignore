@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.local
+
+# Runtime artefacts
+logs/
+feedback.jsonl
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

@@ -11,24 +11,42 @@ echo ""
 # ── 2. Check prerequisites ────────────────────────────────────────────────────
 missing=0
 
-if ! command -v docker &>/dev/null; then
-  echo "✗ docker not found"
+# Pick a container runtime. Prefer Docker; fall back to Podman.
+runtime_cmd=""
+if command -v docker &>/dev/null; then
+  runtime_cmd="docker"
+elif command -v podman &>/dev/null; then
+  runtime_cmd="podman"
+else
+  echo "✗ no container runtime found"
   echo "  Install Docker: https://docs.docker.com/get-docker/"
+  echo "  or Podman:      https://podman.io/docs/installation"
   missing=1
 fi
 
+# Pick a compose CLI for the chosen runtime. Try the v2 plugin first
+# ("docker compose" / "podman compose"), then the standalone tool
+# ("docker-compose" / "podman-compose").
 has_compose=0
-if docker compose version &>/dev/null 2>&1; then
-  has_compose=1
-  compose_cmd="docker compose"
-elif command -v docker-compose &>/dev/null; then
-  has_compose=1
-  compose_cmd="docker-compose"
+compose_cmd=""
+if [ -n "$runtime_cmd" ]; then
+  if $runtime_cmd compose version &>/dev/null 2>&1; then
+    has_compose=1
+    compose_cmd="$runtime_cmd compose"
+  elif command -v "${runtime_cmd}-compose" &>/dev/null; then
+    has_compose=1
+    compose_cmd="${runtime_cmd}-compose"
+  fi
 fi
 
-if [ "$has_compose" -eq 0 ]; then
-  echo "✗ docker compose not found"
-  echo "  Install Docker Compose: https://docs.docker.com/compose/install/"
+if [ "$has_compose" -eq 0 ] && [ "$missing" -eq 0 ]; then
+  echo "✗ ${runtime_cmd} compose not found"
+  if [ "$runtime_cmd" = "docker" ]; then
+    echo "  Install Docker Compose: https://docs.docker.com/compose/install/"
+  else
+    echo "  Install podman-compose: pip install podman-compose"
+    echo "  or upgrade Podman to 4.0+ for the built-in 'podman compose' plugin"
+  fi
   missing=1
 fi
 
@@ -44,7 +62,7 @@ if [ "$missing" -eq 1 ]; then
   exit 1
 fi
 
-echo "✓ Prerequisites found"
+echo "✓ Prerequisites found (using ${runtime_cmd})"
 
 # ── 3. Create .env file ───────────────────────────────────────────────────────
 if [ -f .env ]; then

@@ -3,12 +3,13 @@
 Orchestrates four tools (flights, hotels, cultural guide, DuckDuckGo search)
 through a ReAct-style loop built with LangGraph. LLM tracing is provided by
 the Traceloop SDK (OpenLLMetry); spans are exported via OTLP to whatever
-collector is configured by TRACELOOP_BASE_URL (typically the Observe Agent
-on localhost:4318).
+collector is configured by TRACELOOP_BASE_URL (HTTP, port 4318) or by
+OTEL_EXPORTER_OTLP_ENDPOINT (gRPC, port 4317), typically the Observe Agent.
 """
 
 import logging
 import operator
+import os
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
@@ -38,20 +39,42 @@ TRACE_DESTINATION = "observe"
 def _init_tracing() -> None:
     """Initialize Traceloop instrumentation for LangChain / OpenAI.
 
-    Traceloop reads its OTLP endpoint from TRACELOOP_BASE_URL and exports
-    spans there (defaults to http://localhost:4318). Failures are non-fatal.
+    Protocol selection follows the OTel env convention:
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf (default) — Traceloop's
+        bundled HTTP exporter; reads TRACELOOP_BASE_URL (port 4318).
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc — installs the gRPC exporter and
+        points it at OTEL_EXPORTER_OTLP_ENDPOINT (port 4317 by convention).
+
+    Failures are non-fatal: the app serves requests without tracing.
     """
     try:
         from traceloop.sdk import Traceloop
     except ImportError:
         return  # tracing is optional — silently skip when SDK isn't installed
 
+    protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf").lower().strip()
+    init_kwargs: dict = {"app_name": "travelshaper", "telemetry_enabled": False}
+
+    if protocol == "grpc":
+        try:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                OTLPSpanExporter,
+            )
+            endpoint = os.getenv(
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+                os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+            )
+            init_kwargs["exporter"] = OTLPSpanExporter(endpoint=endpoint, insecure=True)
+        except ImportError:
+            logger.warning(
+                "OTEL_EXPORTER_OTLP_PROTOCOL=grpc but the gRPC exporter is "
+                "not installed; falling back to HTTP/protobuf"
+            )
+            protocol = "http/protobuf"
+
     try:
-        Traceloop.init(
-            app_name="travelshaper",
-            telemetry_enabled=False,
-        )
-        logger.info("Tracing initialized via Traceloop SDK")
+        Traceloop.init(**init_kwargs)
+        logger.info("Tracing initialized via Traceloop SDK (protocol=%s)", protocol)
     except Exception as exc:
         logger.warning("Tracing init failed (non-fatal): %s", exc)
 

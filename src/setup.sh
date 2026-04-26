@@ -65,8 +65,16 @@ fi
 echo "✓ Prerequisites found (using ${runtime_cmd})"
 
 # Pre-create the host-side logs dir so the ./logs:/app/logs bind mount
-# has somewhere to land (rootless Podman does not auto-create it).
-mkdir -p logs
+# has somewhere to land (rootless Podman does not auto-create it), and
+# chown it to UID/GID 1000 so the non-root container user (created in
+# the Dockerfile) can write travelshaper.log into it.
+LOGS_DIR="$(pwd)/logs"
+mkdir -p "$LOGS_DIR"
+if ! chown 1000:1000 "$LOGS_DIR" 2>/dev/null; then
+  echo "⚠ Could not chown ${LOGS_DIR} to uid 1000 (need root or rootless namespace)."
+  echo "  If logs do not appear, run:  sudo chown 1000:1000 ${LOGS_DIR}"
+  echo "  or, on rootless Podman:      podman unshare chown 1000:1000 ${LOGS_DIR}"
+fi
 
 # ── 3. Create .env file ───────────────────────────────────────────────────────
 if [ -f .env ]; then

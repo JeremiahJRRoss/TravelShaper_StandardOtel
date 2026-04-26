@@ -20,6 +20,7 @@ requests = "^2.31"
 openai = "^1.58"
 traceloop-sdk = "^0.33"
 python-json-logger = "^2.0"
+opentelemetry-exporter-otlp-proto-grpc = "~1.28"
 pytest = {version = "^8", optional = true}
 httpx = {version = "^0.27", optional = true}
 

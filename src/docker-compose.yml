@@ -5,11 +5,16 @@ services:
       - "8000:8000"
     env_file: .env
     environment:
-      # Traceloop / Observe Agent — agent runs on the host and receives OTLP
-      # traces on port 4318. host.docker.internal resolves to the host on
-      # Docker Desktop (Mac/Windows); on Linux pass --add-host or override.
+      # Traceloop / Observe Agent — agent runs on the host and receives OTLP.
+      # Default protocol is HTTP/protobuf on port 4318. To switch to gRPC,
+      # set OTEL_EXPORTER_OTLP_PROTOCOL=grpc and OTEL_EXPORTER_OTLP_ENDPOINT
+      # to the agent's gRPC port (typically 4317). host.docker.internal
+      # resolves to the host on Docker Desktop (Mac/Windows); on Linux pass
+      # --add-host or override.
       TRACELOOP_BASE_URL: ${TRACELOOP_BASE_URL:-http://host.docker.internal:4318}
       TRACELOOP_TRACE_CONTENT: ${TRACELOOP_TRACE_CONTENT:-true}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       # App-level resource attributes. Infra attributes (deployment.environment,
       # host.name, cluster IDs) are set on the Observe Agent's resource processor.
       OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-service.version=0.3.0}

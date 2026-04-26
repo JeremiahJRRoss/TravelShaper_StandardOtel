@@ -5,6 +5,7 @@ nodes and that all four tools are registered — without making any live
 LLM or API calls.
 """
 
+import os
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -73,9 +74,51 @@ def test_init_tracing_calls_traceloop() -> None:
     fake_traceloop_cls = MagicMock()
     fake_module.Traceloop = fake_traceloop_cls
 
-    with patch.dict(sys.modules, {"traceloop.sdk": fake_module}):
+    with patch.dict(sys.modules, {"traceloop.sdk": fake_module}), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("OTEL_EXPORTER_OTLP_PROTOCOL", None)
         _init_tracing()
 
     fake_traceloop_cls.init.assert_called_once()
     call_kwargs = fake_traceloop_cls.init.call_args.kwargs
     assert call_kwargs.get("app_name") == "travelshaper"
+    # No exporter override on the HTTP/protobuf default path
+    assert "exporter" not in call_kwargs
+
+
+def test_init_tracing_grpc_protocol() -> None:
+    """OTEL_EXPORTER_OTLP_PROTOCOL=grpc passes a gRPC exporter to Traceloop."""
+    from agent import _init_tracing
+
+    fake_traceloop_module = MagicMock()
+    fake_traceloop_cls = MagicMock()
+    fake_traceloop_module.Traceloop = fake_traceloop_cls
+
+    fake_grpc_module = MagicMock()
+    fake_exporter_cls = MagicMock()
+    fake_exporter_instance = MagicMock()
+    fake_exporter_cls.return_value = fake_exporter_instance
+    fake_grpc_module.OTLPSpanExporter = fake_exporter_cls
+
+    patched_modules = {
+        "traceloop.sdk": fake_traceloop_module,
+        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter": fake_grpc_module,
+    }
+
+    with patch.dict(sys.modules, patched_modules), \
+         patch.dict(os.environ, {
+             "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317",
+         }, clear=False):
+        # Clear the per-signal override so the generic endpoint wins
+        os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+        _init_tracing()
+
+    fake_exporter_cls.assert_called_once()
+    exporter_kwargs = fake_exporter_cls.call_args.kwargs
+    assert exporter_kwargs.get("endpoint") == "http://collector:4317"
+    assert exporter_kwargs.get("insecure") is True
+
+    fake_traceloop_cls.init.assert_called_once()
+    init_kwargs = fake_traceloop_cls.init.call_args.kwargs
+    assert init_kwargs.get("exporter") is fake_exporter_instance

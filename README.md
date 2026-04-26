@@ -54,11 +54,11 @@ log file simply accumulates on disk.
 
 ## Choose How to Run
 
-There are two ways to run TravelShaper. Pick the one that fits your situation — they produce identical results.
+There are two main ways to run TravelShaper. Pick the one that fits your situation — they produce identical results.
 
-### Option A: Docker Compose (recommended)
+### Option A: Docker or Podman Compose (recommended)
 
-This is the fastest path. Docker handles Python versions and dependencies in one command. You do not need a virtual environment.
+This is the fastest path. The container runtime handles Python versions and dependencies in one command — you do not need a virtual environment. TravelShaper's `Dockerfile` and `docker-compose.yml` are OCI-compliant, so they work unchanged with either Docker or Podman; `setup.sh` auto-detects whichever runtime is installed.
 
 ```bash
 cd src
@@ -66,28 +66,68 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The setup script checks prerequisites (it detects both `docker compose` v2 and legacy `docker-compose`), prompts for API keys if `.env` does not exist yet, builds the container, and starts the service. When it finishes:
+The setup script picks Docker first, falls back to Podman, then probes for the matching compose CLI (`docker compose` v2 → `docker-compose` → `podman compose` → `podman-compose`). It prompts for API keys if `.env` does not exist yet, builds the container, and starts the service. When it finishes:
 
 | Service | URL |
 |---------|-----|
 | TravelShaper (app + API) | [http://localhost:8000](http://localhost:8000) |
 
-The Observe Agent runs on the host (or as a separate sidecar) and is **not** managed by docker-compose. The compose file bind-mounts `./logs:/app/logs` so the agent's filelog receiver can tail `travelshaper.log` from outside the container.
+The Observe Agent runs on the host (or as a separate sidecar) and is **not** managed by compose. The compose file bind-mounts `./logs:/app/logs` so the agent's filelog receiver can tail `travelshaper.log` from outside the container.
 
 To stop everything:
 
 ```bash
 docker compose down
-# or, if using legacy Docker Compose:
+# or, on Podman:
+podman compose down
+# or, with the legacy standalone tools:
 docker-compose down
+podman-compose down
 ```
 
-To rebuild after code changes (Docker caches aggressively — this ensures fresh containers):
+To rebuild after code changes (container layers cache aggressively — this ensures fresh containers):
 
 ```bash
-docker compose build --no-cache
-docker compose up -d
+docker compose build --no-cache && docker compose up -d
+# or, on Podman:
+podman compose build --no-cache && podman compose up -d
 ```
+
+#### Installing Podman as an alternative to Docker
+
+Podman is a daemonless, drop-in alternative to Docker. Install it once for your platform, then `setup.sh` will detect and use it automatically.
+
+- **macOS (Homebrew):**
+  ```bash
+  brew install podman
+  podman machine init
+  podman machine start
+  ```
+- **Linux (Debian / Ubuntu):**
+  ```bash
+  sudo apt update
+  sudo apt install -y podman podman-compose
+  ```
+- **Linux (Fedora / RHEL / Rocky):**
+  ```bash
+  sudo dnf install -y podman podman-compose
+  ```
+- **Windows:** install [Podman Desktop](https://podman.io/) or run `winget install RedHat.Podman`, then:
+  ```powershell
+  podman machine init
+  podman machine start
+  ```
+
+If you prefer to skip `setup.sh`, the equivalent manual sequence is:
+
+```bash
+cd src
+cp .env.example .env   # then fill in your API keys
+podman compose build
+podman compose up -d
+```
+
+> **Linux Podman gotcha:** the compose file points `TRACELOOP_BASE_URL` at `host.docker.internal:4318`, which Mac/Windows resolve automatically but Linux does not. Either override the URL in `.env` to your host's IP, or start the stack with an explicit alias: `podman compose --add-host host.docker.internal:host-gateway up -d`.
 
 ### Option B: Local virtual environment
 
@@ -135,16 +175,18 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-### If you are using Docker
+### If you are using Docker or Podman
 
-The `docker-compose.yml` does not include a dedicated test service, so you run pytest inside the existing `travelshaper` container:
+The compose file does not include a dedicated test service, so you run pytest inside the existing `travelshaper` container:
 
 ```bash
 cd src
 docker compose exec travelshaper pytest tests/ -v
+# or, on Podman:
+podman compose exec travelshaper pytest tests/ -v
 ```
 
-If the container is not already running, start it first with `docker compose up -d`, then run the command above.
+If the container is not already running, start it first with `docker compose up -d` (or `podman compose up -d`), then run the command above.
 
 Expected output: a passing run of the unit suite (no live network calls).
 
@@ -373,6 +415,10 @@ There is a pattern in how TravelShaper makes its choices, and the pattern is wor
 **Missing traces in Observe** — confirm an Observe Agent is running on the host with an OTLP receiver on port 4318. Inside Docker, `TRACELOOP_BASE_URL` defaults to `http://host.docker.internal:4318` so traffic crosses the container boundary correctly on Mac/Windows; on Linux you may need to add `--add-host` or run the agent in the same Docker network. Check the agent's logs for ingest activity, then look in the Observe Trace Explorer.
 
 **Missing logs in Observe** — confirm the Observe Agent's filelog receiver is configured to tail `./logs/travelshaper.log` (mounted at `/app/logs/travelshaper.log` inside the container). The file is created lazily on first log write — make at least one request, then check that `./logs/travelshaper.log` exists on the host.
+
+**Podman on Linux: traces never reach the Observe Agent** — root cause is the missing `host.docker.internal` mapping. Two fixes: either (a) override `TRACELOOP_BASE_URL` in `.env` to the host's actual IP (e.g. `http://10.0.2.2:4318` for Podman's default network), or (b) start the stack with the explicit alias: `podman compose --add-host host.docker.internal:host-gateway up -d`.
+
+**`setup.sh` says "no container runtime found"** — install Docker (https://docs.docker.com/get-docker/) or Podman (https://podman.io/docs/installation) and rerun. On macOS Podman also requires `podman machine init && podman machine start` before the script will work.
 
 ---
 

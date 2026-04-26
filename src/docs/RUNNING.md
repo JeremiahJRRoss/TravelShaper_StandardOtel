@@ -71,15 +71,18 @@ the host-side **Observe Agent** OTLP/HTTP receiver.
 uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Option B — Docker Compose
+### Option B — Docker or Podman Compose
 
-`docker-compose.yml` defines a single `travelshaper` service. The Observe
-Agent runs on the **host** (not in compose) and is user-managed. The
-container bind-mounts `./logs:/app/logs` so the host-side Observe Agent
+`docker-compose.yml` defines a single `travelshaper` service and is
+OCI-compliant, so it runs unchanged under either Docker or Podman. The
+Observe Agent runs on the **host** (not in compose) and is user-managed.
+The container bind-mounts `./logs:/app/logs` so the host-side Observe Agent
 can tail `/app/logs/travelshaper.log` (structured JSON).
 
 ```bash
 docker compose up --build
+# or, on Podman:
+podman compose up --build
 ```
 
 | Service | URL |
@@ -91,10 +94,26 @@ Traces are exported via OTLP/HTTP to `TRACELOOP_BASE_URL` and surface in
 
 ### Option C — One-command setup
 
+`setup.sh` auto-detects whichever runtime is installed (`docker` first,
+then `podman`) and the matching compose CLI (v2 plugin first, standalone
+fallback). No flags needed.
+
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
+
+#### Installing Podman
+
+If you do not already have Docker, Podman is a daemonless drop-in. See the
+top-level [`README.md`](../../README.md#installing-podman-as-an-alternative-to-docker)
+for the full notes (including the Linux `host.docker.internal` workaround).
+Quick reference:
+
+- **macOS:** `brew install podman && podman machine init && podman machine start`
+- **Debian / Ubuntu:** `sudo apt install -y podman podman-compose`
+- **Fedora / RHEL:** `sudo dnf install -y podman podman-compose`
+- **Windows:** [Podman Desktop](https://podman.io/) or `winget install RedHat.Podman`, then `podman machine init && podman machine start`
 
 ---
 

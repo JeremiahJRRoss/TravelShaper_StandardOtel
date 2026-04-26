@@ -10,6 +10,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT (gRPC, port 4317), typically the Observe Agent.
 import logging
 import operator
 import os
+import socket
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
@@ -36,6 +37,29 @@ logger = logging.getLogger(__name__)
 TRACE_DESTINATION = "observe"
 
 
+def _parse_otel_resource_attributes() -> dict:
+    """Parse OTEL_RESOURCE_ATTRIBUTES (k=v,k=v) into a dict.
+
+    Traceloop.init() builds the span Resource from app_name= alone and does
+    not honour the OTel env convention. We parse the env var ourselves and
+    pass the result via resource_attributes= so attributes like
+    deployment.environment, service.version, and service.namespace make
+    it onto every span.
+    """
+    raw = os.getenv("OTEL_RESOURCE_ATTRIBUTES", "")
+    attrs: dict = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        key, _, value = pair.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if key:
+            attrs[key] = value
+    return attrs
+
+
 def _init_tracing() -> None:
     """Initialize Traceloop instrumentation for LangChain / OpenAI.
 
@@ -45,6 +69,10 @@ def _init_tracing() -> None:
       - OTEL_EXPORTER_OTLP_PROTOCOL=grpc — installs the gRPC exporter and
         points it at OTEL_EXPORTER_OTLP_ENDPOINT (port 4317 by convention).
 
+    Resource attributes (deployment.environment, service.version, etc.) are
+    parsed from OTEL_RESOURCE_ATTRIBUTES and passed to Traceloop explicitly,
+    plus an auto-derived service.instance.id from the container hostname.
+
     Failures are non-fatal: the app serves requests without tracing.
     """
     try:
@@ -53,7 +81,17 @@ def _init_tracing() -> None:
         return  # tracing is optional — silently skip when SDK isn't installed
 
     protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf").lower().strip()
-    init_kwargs: dict = {"app_name": "travelshaper"}
+
+    # service.instance.id defaults to the container hostname so each replica
+    # is distinguishable in Observe; an explicit override in
+    # OTEL_RESOURCE_ATTRIBUTES (parsed below) takes precedence.
+    resource_attrs: dict = {"service.instance.id": socket.gethostname()}
+    resource_attrs.update(_parse_otel_resource_attributes())
+
+    init_kwargs: dict = {
+        "app_name": "travelshaper",
+        "resource_attributes": resource_attrs,
+    }
 
     if protocol == "grpc":
         try:
@@ -74,7 +112,10 @@ def _init_tracing() -> None:
 
     try:
         Traceloop.init(**init_kwargs)
-        logger.info("Tracing initialized via Traceloop SDK (protocol=%s)", protocol)
+        logger.info(
+            "Tracing initialized via Traceloop SDK (protocol=%s, resource_attrs=%s)",
+            protocol, sorted(resource_attrs.keys()),
+        )
     except Exception as exc:
         logger.warning("Tracing init failed (non-fatal): %s", exc)
 

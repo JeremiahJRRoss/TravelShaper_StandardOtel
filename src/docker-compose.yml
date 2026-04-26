@@ -21,9 +21,13 @@ services:
       TRACELOOP_TRACE_CONTENT: ${TRACELOOP_TRACE_CONTENT:-true}
       OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://host.docker.internal:4317}
-      # App-level resource attributes. Infra attributes (deployment.environment,
-      # host.name, cluster IDs) are set on the Observe Agent's resource processor.
-      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-service.version=0.3.0}
+      # App-level resource attributes. Comma-separated key=value pairs per
+      # the OTel spec. agent.py parses this and passes the values to
+      # Traceloop.init via resource_attributes=, since the Traceloop SDK
+      # does not read OTEL_RESOURCE_ATTRIBUTES on its own. Override per
+      # environment with a one-line .env entry, e.g.:
+      #   OTEL_RESOURCE_ATTRIBUTES=service.version=0.3.0,deployment.environment=staging
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-service.version=0.3.0,service.namespace=travelshaper,deployment.environment=dev}
       # Debug
       TRAVELSHAPER_DEBUG: ${TRAVELSHAPER_DEBUG:-false}
     volumes:

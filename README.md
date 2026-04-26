@@ -414,12 +414,11 @@ There is a pattern in how TravelShaper makes its choices, and the pattern is wor
 
 **Missing traces in Observe** — confirm an Observe Agent is running on the host with an OTLP receiver on port 4318. Inside Docker, `TRACELOOP_BASE_URL` defaults to `http://host.docker.internal:4318` so traffic crosses the container boundary correctly on Mac/Windows; on Linux you may need to add `--add-host` or run the agent in the same Docker network. Check the agent's logs for ingest activity, then look in the Observe Trace Explorer.
 
-**Switching to OTLP/gRPC (port 4317)** — the default exporter is OTLP/HTTP-protobuf to port 4318. If your Observe Agent only listens on the gRPC port, set both env vars in `.env`:
+**Switching to OTLP/gRPC (port 4317)** — the default exporter is OTLP/HTTP-protobuf to port 4318. If your Observe Agent only listens on the gRPC port, set in `.env`:
 ```
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
-When `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, `TRACELOOP_BASE_URL` is ignored. The gRPC exporter (`opentelemetry-exporter-otlp-proto-grpc`) is now a regular dependency, so no extra install steps are needed.
+Inside Docker / Podman the gRPC endpoint defaults to `host.docker.internal:4317` (the same host alias the HTTP path uses) thanks to the `extra_hosts: host.docker.internal:host-gateway` mapping in `docker-compose.yml`. Override `OTEL_EXPORTER_OTLP_ENDPOINT` only if your agent listens elsewhere — and remember that **`localhost` from inside a container is the container itself**, not your host. When `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, `TRACELOOP_BASE_URL` is ignored. The gRPC exporter (`opentelemetry-exporter-otlp-proto-grpc`) is a regular dependency, so no extra install steps are needed.
 
 **Missing logs in Observe** — confirm the Observe Agent's filelog receiver is configured to tail `./logs/travelshaper.log` (mounted at `/app/logs/travelshaper.log` inside the container). The file is created lazily on first log write — make at least one request, then check that `./logs/travelshaper.log` exists on the host.
 
